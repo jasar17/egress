@@ -32,6 +32,20 @@ The API runs on `http://127.0.0.1:8000`; interactive API docs are at `/docs`.
 
 Run both services for persistence, upload, and export features. The frontend falls back to local demo findings when the API is unavailable.
 
+## Demo
+
+Follow the **[Demo Walkthrough](DEMO_WALKTHROUGH.md)** for a 13-step guided tour of the application.
+
+**Demo asset:** `floor plan/Dubai_Commercial_Building_FLS_Test_FloorPlans.pdf`
+
+The walkthrough covers:
+1. Dashboard navigation
+2. File upload with progress tracking
+3. Review workspace inspection
+4. Finding status workflows (confirm, false positive, resolved, reopen)
+5. CSV export validation
+6. Error handling scenarios
+
 ## Current implementation
 
 ### Frontend: React + Vite
@@ -79,7 +93,8 @@ Run both services for persistence, upload, and export features. The frontend fal
 src/                 React user interface
 backend/app/main.py  FastAPI API, database schema, demo seed data
 backend/requirements.txt
-floor plan/          Reference commercial floor-plan PDF
+floor plan/          Reference commercial floor-plan PDFs and demo asset
+DEMO_WALKTHROUGH.md  13-step end-to-end demo script with versioned asset
 FLS_MVP_PRD.pdf      Original MVP requirements
 FLS_Demo_Backend_PRD.pdf  Demo API requirements/contract
 PROJECT_CONTEXT.md   More detailed architecture and roadmap notes
@@ -101,7 +116,7 @@ PROJECT_CONTEXT.md   More detailed architecture and roadmap notes
    - Consistent styling with `loading-state`, `error-state`, and `empty-state` CSS classes
    - Fallback to demo data when API unavailable
 
-6. **TASK 6 (Final)**: Commit a versioned, tested DXF (or PDF) demo file to the repo. Write a numbered demo walkthrough script documenting: upload flow, processing confirmation, review inspection, finding status changes, and export output.
+6. **TASK 6 ✓ COMPLETED**: Committed versioned demo asset `Dubai_Commercial_Building_FLS_Test_FloorPlans.pdf` to repo. Wrote detailed 13-step demo walkthrough script at [DEMO_WALKTHROUGH.md](DEMO_WALKTHROUGH.md) covering upload, processing, review, finding status updates, and export workflows. Demo is repeatable and verifies all Phase 1 functionality.
 
 ## Longer-term production work
 

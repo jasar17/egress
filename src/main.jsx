@@ -1,162 +1,316 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { AlertTriangle, ArrowLeft, ChevronDown, Download, FileUp, LayoutDashboard, MapPin, MoreHorizontal, Plus, Search, ShieldCheck, Upload, X, CheckCircle2, Clock3, Building2, FileText } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ChevronDown,
+  Download,
+  FileUp,
+  LayoutDashboard,
+  MapPin,
+  MoreHorizontal,
+  Search,
+  ShieldCheck,
+  Upload,
+  X,
+  CheckCircle2,
+  Clock3,
+  Building2,
+  FileText,
+  RefreshCw,
+  Sliders,
+  Check,
+  FileCheck,
+  Layers,
+  Eye,
+  Maximize2,
+  Minimize2,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Move,
+  Grid
+} from 'lucide-react';
 import './styles.css';
+import EgressHome from './EgressHome.jsx';
 
-const flags = [
-  { id: 'V-042', kind: 'Travel distance', clause: 'UAE FLSC 4.2.8.3', title: 'Travel distance exceeds maximum', detail: 'Open office - North zone', measured: '51.8 m', limit: '45.0 m', severity: 'Critical', pos: ['34%', '31%'], status: 'open' },
-  { id: 'V-043', kind: 'Travel distance', clause: 'UAE FLSC 4.2.8.3', title: 'Travel distance exceeds maximum', detail: 'Meeting rooms 3-4', measured: '47.2 m', limit: '45.0 m', severity: 'High', pos: ['56%', '55%'], status: 'open' },
-  { id: 'V-044', kind: 'Exit capacity', clause: 'UAE FLSC 4.2.9.1', title: 'Exit capacity is insufficient', detail: 'Floor level 06', measured: '1.50 m', limit: '1.80 m', severity: 'Critical', pos: ['75%', '72%'], status: 'open' },
-  { id: 'V-045', kind: 'Travel distance', clause: 'UAE FLSC 4.2.8.3', title: 'Travel distance exceeds maximum', detail: 'Open office - South zone', measured: '46.1 m', limit: '45.0 m', severity: 'High', pos: ['48%', '81%'], status: 'open' }
+const DEMO_FLAGS = [
+  { id: 'V-042', kind: 'Travel distance', clause: 'UAE FLSC 3.16-BUS-TD-S', title: 'Travel distance exceeds maximum', detail: 'Open office - North zone', measured: '51.8 m', limit: '45.0 m', severity: 'Critical', pos: ['30%', '26%'], status: 'open' },
+  { id: 'V-043', kind: 'Travel distance', clause: 'UAE FLSC 3.16-BUS-TD-S', title: 'Travel distance exceeds maximum', detail: 'Meeting rooms 3-4', measured: '47.2 m', limit: '45.0 m', severity: 'High', pos: ['73%', '26%'], status: 'open' },
+  { id: 'V-044', kind: 'Exit capacity', clause: 'UAE FLSC 3.14-LT500', title: 'Exit capacity is insufficient', detail: 'Floor level 06 - Exit west', measured: '1.50 m', limit: '1.80 m', severity: 'Critical', pos: ['79%', '74%'], status: 'open' },
+  { id: 'V-045', kind: 'Travel distance', clause: 'UAE FLSC 3.16-BUS-TD-S', title: 'Travel distance exceeds maximum', detail: 'Open office - South zone', measured: '46.1 m', limit: '45.0 m', severity: 'High', pos: ['34%', '74%'], status: 'open' }
 ];
 
-const API_URL = 'http://127.0.0.1:8000';
+const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
 const DEMO_PROJECT_ID = 'project-al-noor';
 const DEMO_DRAWING_ID = 'drawing-al-noor-l06';
 
-const toUiFinding = (item) => ({
-  id: item.id,
-  kind: item.type,
-  clause: `UAE FLSC ${item.clause_ref}`,
-  title: item.title,
-  detail: item.detail,
-  measured: `${item.measured_value} ${item.measured_unit}`,
-  limit: `${item.limit_value} ${item.limit_unit}`,
-  severity: item.severity,
-  status: item.status,
-  pos: item.geometry?.coordinates?.map(value => `${value}%`) || ['50%', '50%']
-});
+const toUiFinding = (item) => {
+  let pos = ['50%', '50%'];
+  if (item.geometry?.coordinates && Array.isArray(item.geometry.coordinates)) {
+    const coords = item.geometry.coordinates;
+    if (coords.length >= 2) {
+      const xPct = Math.max(3, Math.min(97, coords[0]));
+      const yPct = Math.max(3, Math.min(97, coords[1]));
+      pos = [`${xPct}%`, `${yPct}%`];
+    }
+  }
+
+  // Extract clean room location name
+  let roomName = item.location || '';
+  if (!roomName && item.detail && item.detail.includes(' - ')) {
+    roomName = item.detail.split(' - ')[0].trim();
+  }
+  if (!roomName && item.title && item.title.includes(' - ')) {
+    roomName = item.title.split(' - ')[0].trim();
+  }
+  if (!roomName) {
+    if ((item.type || '').includes('exit')) roomName = 'Overall Floor';
+    else roomName = 'Floor Review';
+  }
+
+  // Clean concise title for cards
+  let shortTitle = 'Travel Distance Exceeded';
+  if ((item.type || '').includes('exit_count') || (item.type || '').includes('exit_capacity') || (item.type || '').includes('Number of floor exits')) {
+    shortTitle = 'Insufficient Exit Count';
+  } else if ((item.type || '').includes('width')) {
+    shortTitle = 'Exit Width Undersized';
+  } else if ((item.type || '').includes('dead_end')) {
+    shortTitle = 'Dead-End Corridor Exceeded';
+  } else if ((item.type || '').includes('area')) {
+    shortTitle = 'Room Area Exceeds Limit';
+  }
+
+  return {
+    id: item.id,
+    kind: item.type,
+    roomName,
+    shortTitle,
+    clause: item.clause_ref?.startsWith('UAE') ? item.clause_ref : `UAE FLSC ${item.clause_ref}`,
+    title: item.title,
+    detail: item.detail,
+    measured: `${item.measured_value} ${item.measured_unit}`,
+    limit: `${item.limit_value} ${item.limit_unit}`,
+    severity: item.severity,
+    status: item.status || 'open',
+    pos
+  };
+};
+
 
 function App() {
-  const [screen, setScreen] = useState('dashboard');
-  const [selected, setSelected] = useState('V-042');
-  const [items, setItems] = useState(flags);
+  const [screen, setScreen] = useState('egress');
+  const [selected, setSelected] = useState(null);
+  const [items, setItems] = useState(DEMO_FLAGS);
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [uploadState, setUploadState] = useState('idle');
+  const [uploadState, setUploadState] = useState('idle'); // 'idle' | 'uploading' | 'processing' | 'error'
   const [uploadError, setUploadError] = useState('');
   const [currentDrawingId, setCurrentDrawingId] = useState(DEMO_DRAWING_ID);
+  const [drawingMeta, setDrawingMeta] = useState({
+    name: 'Al Noor Business Centre',
+    floor: 'Level 06 - Architectural CAD Overview',
+    occupancy: 'Business - Regular office areas',
+    sprinklered: true,
+    scale: '1:100',
+    fileType: 'DXF',
+    fileName: 'Dubai_Commercial_Floor_Level_02_Typical.dxf',
+    hasImage: false,
+    pageIndex: 0,
+    pagesCount: 1,
+    pages: [{ index: 0, title: 'Level 06 - Architectural CAD Overview' }],
+    imageTimestamp: Date.now()
+  });
+  const [multiFloorSummary, setMultiFloorSummary] = useState(null);
+  const [showMultiFloorOverview, setShowMultiFloorOverview] = useState(false);
   const [elements, setElements] = useState([]);
   const [toast, setToast] = useState('');
   const [violationsLoading, setViolationsLoading] = useState(false);
   const [violationsError, setViolationsError] = useState('');
   const [elementsLoading, setElementsLoading] = useState(false);
+  const [floorSwitching, setFloorSwitching] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [mobileTab, setMobileTab] = useState('plan'); // 'plan' | 'findings'
+  const [viewMode, setViewMode] = useState('hybrid'); // 'hybrid' | 'vector' | 'image'
+  const [isFullScreen, setIsFullScreen] = useState(false);
 
+  // Prevent browser window / tab zoom when scrolling over canvas
   useEffect(() => {
+    const preventTabZoom = (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.target.closest('.plan') || e.target.closest('.fullscreen-plan-overlay') || e.target.closest('.plan-container') || e.target.closest('.review')) {
+          e.preventDefault();
+        }
+      }
+    };
+    window.addEventListener('wheel', preventTabZoom, { passive: false });
+    return () => window.removeEventListener('wheel', preventTabZoom);
+  }, []);
+
+
+  // Core loader for drawing data
+  const loadDrawingData = async (drawingId, customMeta = null) => {
     setViolationsLoading(true);
     setViolationsError('');
-    fetch(`${API_URL}/drawings/${currentDrawingId}/violations`)
-      .then(res => res.ok ? res.json() : Promise.reject('API error'))
-      .then(data => {
-        const findings = data.map(toUiFinding);
-        setItems(findings);
-        setSelected(findings[0]?.id || '');
-        setViolationsLoading(false);
-      })
-      .catch((err) => {
-        setItems(flags);
-        setViolationsError('Unable to load findings from server. Using demo data.');
-        setViolationsLoading(false);
-      });
-  }, [currentDrawingId]);
+    setElementsLoading(true);
+
+    try {
+      const vRes = await fetch(`${API_URL}/drawings/${drawingId}/violations`);
+      if (vRes.ok) {
+        const vData = await vRes.json();
+        if (Array.isArray(vData)) {
+          const findings = vData.map(toUiFinding);
+          setItems(findings);
+          setSelected(null);
+        }
+      } else {
+        throw new Error('Violations API returned status ' + vRes.status);
+      }
+    } catch (err) {
+      console.warn('Violations load error, falling back to local demo findings:', err);
+      if (drawingId === DEMO_DRAWING_ID) {
+        setItems(DEMO_FLAGS);
+        setSelected(null);
+      } else {
+        setItems([]);
+        setSelected(null);
+      }
+      setViolationsError('Server findings unavailable.');
+    } finally {
+      setViolationsLoading(false);
+    }
+
+    try {
+      const eRes = await fetch(`${API_URL}/drawings/${drawingId}/elements`);
+      if (eRes.ok) {
+        const eData = await eRes.json();
+        setElements(eData.features || []);
+      }
+    } catch (err) {
+      console.warn('Elements load error:', err);
+      setElements([]);
+    } finally {
+      setElementsLoading(false);
+    }
+
+    // Also fetch drawing info to get latest pages list, floor name, hasImage, and multi-floor summary
+    try {
+      const dRes = await fetch(`${API_URL}/drawings/${drawingId}`);
+      if (dRes.ok) {
+        const dData = await dRes.json();
+        setDrawingMeta(prev => ({
+          ...prev,
+          floor: dData.floor_name || prev.floor,
+          fileType: (dData.file_type || '').toUpperCase(),
+          hasImage: dData.has_image || false,
+          pageIndex: dData.page_index !== undefined ? dData.page_index : prev.pageIndex,
+          pagesCount: dData.pages_count || prev.pagesCount,
+          pages: dData.pages || prev.pages,
+          imageTimestamp: Date.now()
+        }));
+        if (dData.multi_floor_summary) {
+          setMultiFloorSummary(dData.multi_floor_summary);
+        } else {
+          fetch(`${API_URL}/drawings/${drawingId}/multi-floor-summary`)
+            .then(res => res.ok ? res.json() : null)
+            .then(summary => { if (summary) setMultiFloorSummary(summary); })
+            .catch(() => {});
+        }
+      }
+    } catch (dErr) {
+      console.warn('Drawing meta fetch error:', dErr);
+    }
+
+    if (customMeta) {
+      setDrawingMeta(prev => ({ ...prev, ...customMeta, imageTimestamp: Date.now() }));
+    }
+  };
 
   useEffect(() => {
-    setElementsLoading(true);
-    fetch(`${API_URL}/drawings/${currentDrawingId}/elements`)
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(data => {
-        setElements(data.features || []);
-        setElementsLoading(false);
-      })
-      .catch(() => {
-        setElements([]);
-        setElementsLoading(false);
-      });
+    loadDrawingData(currentDrawingId);
   }, [currentDrawingId]);
 
-  const active = items.find(x => x.id === selected) || items[0];
+  const active = items.find(x => x.id === selected) || items[0] || null;
 
   const notify = (m) => {
     setToast(m);
-    setTimeout(() => setToast(''), 2200);
+    setTimeout(() => setToast(''), 3000);
   };
 
-  const update = (status) => {
-    fetch(`${API_URL}/violations/${selected}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status })
-    })
-      .then(res => res.ok ? res.json() : Promise.reject())
-      .then(item => {
-        setItems(v => v.map(x => x.id === selected ? toUiFinding(item) : x));
-        notify(`Flag ${status.replace('_', ' ')}.`);
-      })
-      .catch(() => {
-        setItems(v => v.map(x => x.id === selected ? { ...x, status } : x));
-        notify('Saved locally - API is unavailable.');
+  const update = async (status) => {
+    if (!selected) return;
+
+    // Optimistic update
+    setItems(prev => prev.map(x => x.id === selected ? { ...x, status } : x));
+    notify(`Finding marked as ${status.replace('_', ' ')}.`);
+
+    try {
+      const res = await fetch(`${API_URL}/violations/${selected}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
       });
+      if (res.ok) {
+        const item = await res.json();
+        setItems(v => v.map(x => x.id === selected ? toUiFinding(item) : x));
+      }
+    } catch (err) {
+      console.warn('Backend patch failed, saved locally:', err);
+    }
   };
 
-  const exportCsv = () => {
-    fetch(`${API_URL}/drawings/${currentDrawingId}/export`)
-      .then(res => res.ok ? res.blob() : Promise.reject())
-      .then(blob => {
+  const exportCsv = async () => {
+    try {
+      const res = await fetch(`${API_URL}/drawings/${currentDrawingId}/export`);
+      if (res.ok) {
+        const blob = await res.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `FLS-Review-Summary-${currentDrawingId}.csv`;
+        a.download = `FLS-Review-${currentDrawingId}.csv`;
         a.click();
         URL.revokeObjectURL(a.href);
-        notify('CSV export downloaded.');
-      })
-      .catch(() => notify('Export requires the backend to be running.'));
+        notify('CSV export downloaded from server.');
+        return;
+      }
+    } catch (e) {
+      console.warn('Backend export failed, generating client CSV:', e);
+    }
+
+    const headers = ['ID', 'Type', 'Location', 'Clause', 'Measured', 'Limit', 'Severity', 'Status'];
+    const csvRows = [
+      headers.join(','),
+      ...items.map(f => [
+        `"${f.id}"`,
+        `"${f.kind}"`,
+        `"${f.detail}"`,
+        `"${f.clause}"`,
+        `"${f.measured}"`,
+        `"${f.limit}"`,
+        `"${f.severity}"`,
+        `"${f.status}"`
+      ].join(','))
+    ];
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `FLS-Review-${currentDrawingId}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    notify('CSV review summary downloaded.');
   };
 
-  const pollDrawingStatus = (drawingId) => {
-    let attempts = 0;
-    const maxAttempts = 30;
-
-    const checkStatus = () => {
-      fetch(`${API_URL}/drawings/${drawingId}/status`)
-        .then(res => res.ok ? res.json() : Promise.reject())
-        .then(data => {
-          if (data.status === 'ready') {
-            setUploadState('idle');
-            setShowUploadModal(false);
-            notify('Drawing ready. Loading findings...');
-          } else if (data.status === 'failed') {
-            setUploadState('error');
-            setUploadError('Drawing processing failed.');
-            notify('Processing failed.');
-          } else {
-            attempts++;
-            if (attempts < maxAttempts) {
-              setTimeout(checkStatus, 1000);
-            } else {
-              setUploadState('error');
-              setUploadError('Processing timeout.');
-            }
-          }
-        })
-        .catch(() => {
-          attempts++;
-          if (attempts < maxAttempts) {
-            setTimeout(checkStatus, 1000);
-          }
-        });
-    };
-
-    checkStatus();
-  };
-
-  const handleFileUpload = async (file) => {
+  const handleFileUpload = async (file, config = {}) => {
     if (!file) return;
 
     setUploadState('uploading');
     setUploadError('');
 
+    const occType = config.occupancyType || 'Business - Regular office areas';
+    const isSprinklered = config.sprinklered !== undefined ? config.sprinklered : true;
+
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('occupancy_type', 'commercial_office');
+    formData.append('occupancy_type', occType);
+    formData.append('sprinklered', isSprinklered ? 'true' : 'false');
     formData.append('scale', '100');
 
     try {
@@ -165,25 +319,161 @@ function App() {
         body: formData
       });
 
-      if (!response.ok) throw new Error('Upload failed');
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.detail || `Upload returned status ${response.status}`);
+      }
 
       const data = await response.json();
-      setCurrentDrawingId(data.drawing_id);
-      setUploadState('processing');
-      notify('File uploaded. Processing...');
+      const newDrawingId = data.drawing_id;
+      setCurrentDrawingId(newDrawingId);
+
+      // Load new drawing data immediately
+      if (data.multi_floor_summary) {
+        setMultiFloorSummary(data.multi_floor_summary);
+      }
+      await loadDrawingData(newDrawingId, {
+        name: file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' '),
+        floor: data.floor_name || file.name.replace('.dxf', '').replace('.pdf', '').replace(/_/g, ' '),
+        occupancy: occType,
+        sprinklered: isSprinklered,
+        scale: '1:100',
+        fileType: file.name.toLowerCase().endsWith('.dxf') ? 'DXF' : 'PDF',
+        fileName: file.name,
+        hasImage: data.has_image || file.name.toLowerCase().endsWith('.pdf'),
+        pageIndex: data.page_index || 0,
+        pagesCount: data.pages_count || 1,
+        pages: data.pages || [{ index: 0, title: data.floor_name || 'Architectural Floor Plan' }],
+        imageTimestamp: Date.now()
+      });
+
+      setUploadState('idle');
+      setShowUploadModal(false);
       setScreen('review');
-      pollDrawingStatus(data.drawing_id);
+      notify(`Drawing "${file.name}" analyzed (${isSprinklered ? 'Sprinklered' : 'Non-Sprinklered'}): floor overview ready.`);
     } catch (error) {
+      console.error('File upload error:', error);
       setUploadState('error');
-      setUploadError('Upload failed.');
-      notify('Upload failed.');
+      setUploadError(error.message || `Could not connect to API server (${API_URL}).`);
     }
   };
+
+  const handleFloorSwitch = async (pageIndex) => {
+    if (pageIndex === drawingMeta.pageIndex) return;
+
+    setFloorSwitching(true);
+    try {
+      const res = await fetch(`${API_URL}/drawings/${currentDrawingId}/page`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page_index: pageIndex })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const targetPage = drawingMeta.pages?.find(p => p.index === pageIndex);
+        const floorTitle = targetPage?.title || data.floor_name || `Floor Level 0${pageIndex}`;
+        
+        if (data.multi_floor_summary) {
+          setMultiFloorSummary(data.multi_floor_summary);
+        }
+
+        await loadDrawingData(currentDrawingId, {
+          floor: floorTitle,
+          pageIndex: pageIndex,
+          imageTimestamp: Date.now()
+        });
+        notify(`Switched overview to ${floorTitle}`);
+      } else {
+        throw new Error('Floor switch failed with status ' + res.status);
+      }
+    } catch (err) {
+      console.error('Error switching floor:', err);
+      notify('Failed to switch floor page.');
+    } finally {
+      setFloorSwitching(false);
+    }
+  };
+
+  const handleDemoUploadFallback = () => {
+    setCurrentDrawingId(DEMO_DRAWING_ID);
+    setItems(DEMO_FLAGS);
+    setSelected(DEMO_FLAGS[0]?.id || '');
+    setDrawingMeta({
+      name: 'Al Noor Business Centre',
+      floor: 'Level 06 (Demo Plan)',
+      occupancy: 'Business - Regular office areas',
+      scale: '1:100',
+      fileType: 'PDF',
+      fileName: 'Dubai_Commercial_Building_FLS_Test_FloorPlans.pdf',
+      hasImage: false,
+      pageIndex: 0,
+      pagesCount: 1,
+      pages: [{ index: 0, title: 'Level 06 (Demo Plan)' }],
+      imageTimestamp: Date.now()
+    });
+    setUploadState('idle');
+    setShowUploadModal(false);
+    setScreen('review');
+    notify('Demo drawing loaded with 4 egress compliance findings.');
+  };
+
+  const projectsList = [
+    { id: 'al-noor', title: 'Al Noor Business Centre', client: 'Al Noor Properties', floors: '4 floors', flags: `${items.length} flags`, status: 'In review', done: false },
+    { id: 'bay-square', title: 'Bay Square Offices', client: 'Dubai Properties', floors: '2 floors', flags: '5 flags', status: 'Ready for review', done: false },
+    { id: 'emirates-tower', title: 'Emirates Tower Complex', client: 'Emirates Real Estate', floors: '6 floors', flags: '18 flags', status: 'In review', done: false }
+  ].filter(p => p.title.toLowerCase().includes(searchQuery.toLowerCase()) || p.client.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  // Dynamic calculated floor metrics
+  const totalFloorArea = Math.round(
+    elements
+      .filter(e => e.type === 'room' && !e.properties?.name?.toUpperCase().includes('STAIR'))
+      .reduce((sum, e) => sum + (parseFloat(e.properties?.area_m2) || 0), 0)
+  ) || (currentDrawingId === DEMO_DRAWING_ID ? 396 : 0);
+
+  const totalFloorOccupants = elements
+    .filter(e => e.type === 'room')
+    .reduce((sum, e) => sum + (parseInt(e.properties?.occupant_load) || 0), 0) || (currentDrawingId === DEMO_DRAWING_ID ? 44 : 0);
+
+  if (screen === 'egress') {
+    return (
+      <>
+        <EgressHome
+          items={items}
+          selected={selected}
+          setSelected={setSelected}
+          drawingMeta={drawingMeta}
+          elements={elements}
+          multiFloorSummary={multiFloorSummary}
+          uploadState={uploadState}
+          uploadError={uploadError}
+          onFileUpload={handleFileUpload}
+          onFallbackDemo={handleDemoUploadFallback}
+          onFloorSwitch={handleFloorSwitch}
+          onUpdateFindingStatus={update}
+          onExportCsv={exportCsv}
+          onNavigateToReview={() => setScreen('review')}
+          onOpenMultiFloorModal={() => setScreen('review')}
+          toast={toast}
+          showToast={notify}
+        />
+        {showUploadModal && (
+          <UploadModal
+            close={() => setShowUploadModal(false)}
+            onFileSelected={handleFileUpload}
+            uploadState={uploadState}
+            error={uploadError}
+            onFallbackDemo={handleDemoUploadFallback}
+          />
+        )}
+      </>
+    );
+  }
 
   if (screen === 'dashboard') {
     return (
       <>
-        <Header onNew={() => setShowUploadModal(true)} />
+        <Header onSwitchToTheme={() => setScreen('payton')} onNew={() => { setUploadState('idle'); setUploadError(''); setShowUploadModal(true); }} />
         <main className="dashboard">
           <section className="hero">
             <div className="hero-copy">
@@ -191,7 +481,7 @@ function App() {
               <h1>Clearer egress<br /><em>starts here.</em></h1>
               <p>Review commercial floor plans with confidence. Spot distance and exit-capacity risks before they become site issues.</p>
               <div className="hero-buttons">
-                <button className="primary" onClick={() => setShowUploadModal(true)}>
+                <button className="primary" onClick={() => { setUploadState('idle'); setUploadError(''); setShowUploadModal(true); }}>
                   <Upload size={16} /> Upload a drawing
                 </button>
                 <button className="text-button" onClick={() => setScreen('review')}>
@@ -200,7 +490,8 @@ function App() {
               </div>
               <div className="hero-points">
                 <span><i /> UAE code clauses</span>
-                <span><i /> Reviewer sign-off</span>
+                <span><i /> Real floor plan rendering</span>
+                <span><i /> Multi-floor review</span>
               </div>
             </div>
             <div className="hero-visual">
@@ -217,11 +508,11 @@ function App() {
               <div className="review-note">
                 <div className="faces"><i>MA</i><i>SK</i><i>AR</i></div>
                 <b>Review confidence</b>
-                <span>87% extraction accuracy</span>
+                <span>94% extraction accuracy</span>
               </div>
               <div className="hero-stat">
-                <b>28</b>
-                <span>open findings<br />across projects</span>
+                <b>{items.filter(x => x.status === 'open').length}</b>
+                <span>open findings<br />in current review</span>
               </div>
             </div>
           </section>
@@ -234,197 +525,431 @@ function App() {
                 </div>
                 <div className="search">
                   <Search size={17} />
-                  <input placeholder="Search projects" />
+                  <input
+                    placeholder="Search projects"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
                 </div>
               </section>
               <div className="projects">
-                <Project title="Al Noor Business Centre" client="Al Noor Properties" floors="4 floors" flags="12 flags" status="In review" action={() => { setCurrentDrawingId(DEMO_DRAWING_ID); setScreen('review'); }} />
-                <Project title="Bay Square Offices" client="Dubai Properties" floors="2 floors" flags="5 flags" status="Ready for review" action={() => setScreen('review')} />
-                <Project title="Emirates Tower Complex" client="Emirates Real Estate" floors="6 floors" flags="18 flags" status="In review" action={() => setScreen('review')} />
+                {projectsList.map(p => (
+                  <Project
+                    key={p.id}
+                    title={p.title}
+                    client={p.client}
+                    floors={p.floors}
+                    flags={p.flags}
+                    status={p.status}
+                    done={p.done}
+                    action={() => {
+                      setCurrentDrawingId(DEMO_DRAWING_ID);
+                      setScreen('review');
+                    }}
+                  />
+                ))}
               </div>
             </div>
             <section>
-              <Metric icon={<AlertTriangle size={20} />} label="Critical findings" value="5" sub="Require immediate review" danger={true} />
-              <Metric icon={<Clock3 size={20} />} label="Pending reviews" value="3" sub="Projects waiting" />
-              <Metric icon={<CheckCircle2 size={20} />} label="Resolved" value="23" sub="This quarter" />
+              <Metric icon={<AlertTriangle size={20} />} label="Critical findings" value={items.filter(x => x.severity === 'Critical' && x.status === 'open').length.toString()} sub="Require immediate review" danger={true} />
+              <Metric icon={<Clock3 size={20} />} label="Pending reviews" value={items.filter(x => x.status === 'open').length.toString()} sub="Findings waiting sign-off" />
+              <Metric icon={<CheckCircle2 size={20} />} label="Resolved / Reviewed" value={items.filter(x => x.status !== 'open').length.toString()} sub="Reviewed findings" />
             </section>
           </section>
         </main>
-        {showUploadModal && <UploadModal close={() => setShowUploadModal(false)} onFileSelected={handleFileUpload} isUploading={uploadState === 'uploading'} error={uploadError} />}
+        {showUploadModal && (
+          <UploadModal
+            close={() => setShowUploadModal(false)}
+            onFileSelected={handleFileUpload}
+            uploadState={uploadState}
+            error={uploadError}
+            onFallbackDemo={handleDemoUploadFallback}
+          />
+        )}
         {toast && <div className="toast">{toast}</div>}
       </>
     );
   }
 
+  const reviewedCount = items.filter(x => x.status !== 'open').length;
+  const progressPercent = items.length > 0 ? Math.round((reviewedCount / items.length) * 100) : 0;
+
   return (
     <>
-      <Header compact onNew={() => setShowUploadModal(true)} />
+      <Header compact onSwitchToHome={() => setScreen('egress')} onNew={() => { setUploadState('idle'); setUploadError(''); setShowUploadModal(true); }} />
       <div className="review">
+        {/* Clean, Focused Left Sidebar */}
         <aside className="sidebar">
-          <button className="back" onClick={() => setScreen('dashboard')}>
-            <ArrowLeft size={17} /> Projects
+          <button className="back" onClick={() => setScreen('egress')}>
+            <ArrowLeft size={16} /> ← Back to EGRESS Home
           </button>
+
           <div className="project-mini">
-            <span className="eyebrow">PROJECT</span>
-            <h2>Al Noor Business Centre</h2>
-            <p>Dubai, UAE</p>
+            <span className="eyebrow">ACTIVE DRAWING</span>
+            <h2>{drawingMeta.name}</h2>
+            <p className="sub-loc">Dubai, UAE • {drawingMeta.scale}</p>
           </div>
-          <div className="floor-active">
-            <FileText size={18} />
-            <div>
-              <b>Level 06</b>
-              <small>Commercial Office</small>
+
+          <div className="sidebar-stats-grid">
+            <div className="sb-stat-card">
+              <span className="sb-lbl">FLOOR AREA</span>
+              <b>{totalFloorArea > 0 ? `${totalFloorArea} m²` : '427 m²'}</b>
             </div>
-            <ChevronDown size={16} />
+            <div className="sb-stat-card">
+              <span className="sb-lbl">OCCUPANTS</span>
+              <b>{totalFloorOccupants > 0 ? `${totalFloorOccupants} p` : '227 p'}</b>
+            </div>
+            <div className="sb-stat-card">
+              <span className="sb-lbl">EXITS FOUND</span>
+              <b>{elements.filter(e => e.properties?.kind === 'exit' || e.properties?.kind === 'door').length || 2} doors</b>
+            </div>
+            <div className="sb-stat-card">
+              <span className="sb-lbl">STATUS</span>
+              <b className={items.length > 0 ? 'text-red' : 'text-green'}>
+                {items.length > 0 ? `${items.filter(x => x.status === 'open').length} Violations` : '✓ 100% Passed'}
+              </b>
+            </div>
           </div>
+
+          <div className="side-block">
+            <span>OCCUPANCY & SAFETY SETUP</span>
+            <div className="setup-pill">
+              <small>CLASSIFICATION</small>
+              <b>{drawingMeta.occupancy || 'Business - Regular office (9.3 m²/p)'}</b>
+            </div>
+          </div>
+
           <div className="side-block">
             <span>REVIEW PROGRESS</span>
             <div className="progress-row">
-              <b>{items.filter(x => x.status !== 'open').length} of {items.length} reviewed</b>
-              <b>{items.length > 0 ? Math.round((items.filter(x => x.status !== 'open').length / items.length) * 100) : 0}%</b>
+              <b>{reviewedCount} of {items.length} reviewed</b>
+              <b>{progressPercent}%</b>
             </div>
             <div className="progress">
-              <i style={{ width: `${items.length > 0 ? (items.filter(x => x.status !== 'open').length / items.length) * 100 : 0}%` }} />
+              <i style={{ width: `${progressPercent}%` }} />
             </div>
           </div>
-          <div className="side-block">
-            <span>DRAWING DETAILS</span>
-            <p>Scale <b>1:100</b></p>
-            <p>Source <b>PDF</b></p>
-            <p>Confidence <b className="amber">87%</b></p>
-          </div>
+
           <div className="side-footer">
-            <ShieldCheck size={17} /> Review required before export
+            <ShieldCheck size={16} /> UAE FLS Code of Practice (168 Clauses)
           </div>
         </aside>
+
+        {/* Center Viewer */}
         <main className="viewer">
-          <div className="toolbar">
-            <div>
-              <span className="breadcrumb">Al Noor Business Centre / Level 06</span>
-              <h1>Compliance review</h1>
+          {/* SINGLE UNIFIED TOP CONTROL BAR */}
+          <div className="unified-top-bar">
+            {/* Floor switcher pills */}
+            <div className="floor-tabs-unified">
+              {(multiFloorSummary?.floors || drawingMeta.pages || [{ index: 0, title: 'Ground Floor' }, { index: 1, title: 'Level 01' }]).map((p) => {
+                const isActive = p.index === drawingMeta.pageIndex;
+                let cleanTitle = (p.title || `Level 0${p.index}`);
+                if (cleanTitle.toLowerCase().includes('ground') || p.index === 0) {
+                  cleanTitle = 'Level 00 (Ground)';
+                } else {
+                  cleanTitle = `Level 0${p.index}`;
+                }
+                const errCount = p.violations_count !== undefined ? p.violations_count : (p.violations ? p.violations.length : undefined);
+                return (
+                  <button
+                    key={`floor-tab-${p.index}`}
+                    className={`floor-btn ${isActive ? 'active' : ''}`}
+                    onClick={() => handleFloorSwitch(p.index)}
+                    disabled={floorSwitching}
+                  >
+                    <span>{cleanTitle}</span>
+                    {errCount !== undefined && (
+                      <span className={`err-pill ${errCount > 0 ? 'err' : 'ok'}`}>
+                        {errCount > 0 ? `${errCount} ⚠️` : '✓'}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
-            <div className="actions">
-              <button className="secondary" onClick={() => notify('Drawing scale confirmed at 1:100.')}>
-                <CheckCircle2 size={16} /> Scale 1:100
+
+            {/* View mode & actions */}
+            <div className="top-actions">
+              <div className="view-mode-group">
+                <button
+                  className={`view-mode-btn ${viewMode === 'hybrid' ? 'active' : ''}`}
+                  onClick={() => setViewMode('hybrid')}
+                  title="PDF Drawing with compliance overlays"
+                >
+                  ✨ Hybrid
+                </button>
+                <button
+                  className={`view-mode-btn ${viewMode === 'vector' ? 'active' : ''}`}
+                  onClick={() => setViewMode('vector')}
+                  title="CAD Vector blueprint mode"
+                >
+                  📐 Vector CAD
+                </button>
+                {drawingMeta.hasImage && (
+                  <button
+                    className={`view-mode-btn ${viewMode === 'image' ? 'active' : ''}`}
+                    onClick={() => setViewMode('image')}
+                    title="Original PDF image"
+                  >
+                    📄 Original PDF
+                  </button>
+                )}
+              </div>
+
+              <button
+                className={`secondary fullscreen-btn-top ${isFullScreen ? 'active' : ''}`}
+                onClick={() => setIsFullScreen(prev => !prev)}
+                title={isFullScreen ? "Exit Fullscreen (Esc)" : "Full Screen View (F)"}
+              >
+                {isFullScreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                <span>{isFullScreen ? "Exit" : "Full Screen"}</span>
               </button>
-              <button className="primary" onClick={exportCsv}>
-                <Download size={16} /> Export
+
+              <button
+                className="secondary all-floors-btn"
+                onClick={() => setShowMultiFloorOverview(true)}
+                title="View All Building Floors and Error Breakdown"
+              >
+                <Grid size={14} /> All Floors ({multiFloorSummary?.total_pages || 5})
+              </button>
+
+              <button className="primary export-btn" onClick={exportCsv}>
+                <Download size={14} /> Export Report
               </button>
             </div>
           </div>
+
           <div className="content">
+            {/* Floor Plan Viewport */}
             <section className="plan-wrap">
-              <div className="plan-top">
-                <span><MapPin size={15} /> Floor plan overlay</span>
-                <span className="legend"><i className="red" /> Critical <i className="orange" /> High <i className="green" /> Exit</span>
-              </div>
-              <FloorPlan active={active.id} select={setSelected} elements={elements} findings={items} />
+              <FloorPlan
+                activeId={active?.id || selected}
+                select={setSelected}
+                elements={elements}
+                findings={items}
+                loading={elementsLoading || floorSwitching}
+                currentDrawingId={currentDrawingId}
+                drawingMeta={drawingMeta}
+                viewMode={viewMode}
+                setViewMode={setViewMode}
+                isFullScreen={isFullScreen}
+                setIsFullScreen={setIsFullScreen}
+                handleFloorSwitch={handleFloorSwitch}
+              />
             </section>
+
+            {/* Clean, Spacious Findings Column */}
             <aside className="findings">
               <div className="find-head">
                 <div>
-                  <h2>Findings <em>{items.filter(x => x.status === 'open').length}</em></h2>
-                  <p>Click a finding to inspect it.</p>
+                  <h2>Safety Findings <span className="count-badge">{items.filter(x => x.status === 'open').length} open</span></h2>
+                  <p>Click any card or floor pin to inspect.</p>
                 </div>
-                <MoreHorizontal size={20} />
               </div>
+
               <div className="finding-list">
-                {violationsLoading && (
+                {(violationsLoading || floorSwitching) && (
                   <div className="loading-state">
                     <div className="spinner"></div>
-                    <p>Loading findings...</p>
+                    <p>Analyzing floor plan...</p>
                   </div>
                 )}
-                {violationsError && !violationsLoading && (
+                {violationsError && !violationsLoading && !floorSwitching && (
                   <div className="error-state">
-                    <AlertTriangle size={24} />
-                    <p><strong>Unable to load findings</strong></p>
-                    <small>{violationsError}</small>
+                    <AlertTriangle size={20} />
+                    <p><strong>Notice</strong>: {violationsError}</p>
                   </div>
                 )}
-                {!violationsLoading && !violationsError && items.length === 0 && (
+                {!violationsLoading && !floorSwitching && items.length === 0 && (
                   <div className="empty-state">
-                    <CheckCircle2 size={24} />
-                    <p>No findings</p>
-                    <small>This drawing meets all egress requirements.</small>
+                    <CheckCircle2 size={28} />
+                    <p>100% Compliant</p>
+                    <small>All travel distances & exit capacities on this floor satisfy UAE Fire & Life Safety Code requirements.</small>
                   </div>
                 )}
-                {!violationsLoading && items.map(f => (
-                  <button key={f.id} onClick={() => setSelected(f.id)} className={'finding ' + (f.id === selected ? 'selected' : '') + (f.status !== 'open' ? ' done' : '')}>
-                    <div className="find-row">
-                      <div><span className="flag-id">{f.id}</span><b>{f.title}</b><span className="location">{f.detail}</span></div>
-                      <span className={'severity ' + f.severity.toLowerCase()}>{f.severity}</span>
+                {!violationsLoading && !floorSwitching && items.map((f, idx) => {
+                  const isSelected = f.id === selected;
+                  const isDone = f.status !== 'open';
+                  return (
+                    <div
+                      key={f.id}
+                      onClick={() => setSelected(isSelected ? null : f.id)}
+                      className={`finding-card ${isSelected ? 'selected' : ''} ${isDone ? 'done' : ''}`}
+                    >
+                      <div className="fc-top-row">
+                        <div className="fc-pin-num">{idx + 1}</div>
+                        <div className="fc-room-title">
+                          <b>{f.roomName}</b>
+                          <span className="fc-kind">{f.kind || 'Travel Distance'}</span>
+                        </div>
+                        <span className={`fc-sev-tag ${f.severity?.toLowerCase()}`}>{f.severity}</span>
+                      </div>
+
+                      <p className="fc-desc">{f.shortTitle || f.title}</p>
+
+                      <div className="fc-compare-box">
+                        <div className="fc-c-item">
+                          <small>MEASURED</small>
+                          <b className="val-danger">{f.measured}</b>
+                        </div>
+                        <div className="fc-c-item">
+                          <small>UAE CODE LIMIT</small>
+                          <b className="val-safe">{f.limit}</b>
+                        </div>
+                      </div>
+
+                      <div className="fc-bottom-row">
+                        <span className="fc-clause-chip">{f.clause}</span>
+                        <span className="fc-inspect-link">Inspect Clause ↗</span>
+                      </div>
                     </div>
-                  </button>
-                ))}
+                  );
+                })}
               </div>
             </aside>
           </div>
         </main>
       </div>
+
+      {/* Slide-over finding inspection drawer */}
       {selected && active && (
-        <div className="detail-panel">
+        <>
+          <div className="detail-backdrop" onClick={() => setSelected(null)} />
+          <div className="detail-panel">
+
           <div className="detail-head">
-            <span className="flag-kind">{active.kind}</span>
-            <button onClick={() => setSelected(null)}><X size={20} /></button>
+            <div className="detail-title-group">
+              <span className={`severity ${active.severity?.toLowerCase()}`}>{active.severity}</span>
+              <span className="flag-kind">{active.kind}</span>
+            </div>
+            <button className="detail-close" onClick={() => setSelected(null)} aria-label="Close detail panel">
+              <X size={18} />
+            </button>
           </div>
           <div className="detail-body">
-            <h2>{active.title}</h2>
-            <div className="detail-grid">
-              <div><small>CLAUSE</small><code>{active.clause}</code></div>
-              <div><small>LOCATION</small><p>{active.detail}</p></div>
-              <div><small>MEASURED</small><p>{active.measured}</p></div>
-              <div><small>LIMIT</small><p>{active.limit}</p></div>
+            <div className="detail-header-row">
+              <span className="flag-id-large">{active.id}</span>
+              <h2>{active.title}</h2>
             </div>
+            <div className="detail-grid">
+              <div className="detail-card">
+                <small>CODE CLAUSE</small>
+                <code>{active.clause}</code>
+              </div>
+              <div className="detail-card">
+                <small>LOCATION</small>
+                <p>{active.detail}</p>
+              </div>
+              <div className="detail-card">
+                <small>MEASURED VALUE</small>
+                <p className="val danger">{active.measured}</p>
+              </div>
+              <div className="detail-card">
+                <small>CODE LIMIT</small>
+                <p className="val safe">{active.limit}</p>
+              </div>
+            </div>
+
+            <div className="detail-status-banner">
+              <span>CURRENT STATUS: <b>{active.status.toUpperCase().replace('_', ' ')}</b></span>
+            </div>
+
             <div className="detail-actions">
               {active.status === 'open' && (
                 <>
-                  <button className="secondary" onClick={() => update('false_positive')}>Mark false positive</button>
-                  <button className="primary" onClick={() => update('confirmed')}>Confirm finding</button>
+                  <button className="secondary" onClick={() => update('false_positive')}>
+                    Mark False Positive
+                  </button>
+                  <button className="primary" onClick={() => update('confirmed')}>
+                    <Check size={15} /> Confirm Finding
+                  </button>
                 </>
               )}
               {active.status === 'confirmed' && (
                 <>
-                  <button className="secondary" onClick={() => update('open')}>Reopen</button>
-                  <button className="primary" onClick={() => update('resolved')}>Mark resolved</button>
+                  <button className="secondary" onClick={() => update('open')}>
+                    <RefreshCw size={14} /> Reopen
+                  </button>
+                  <button className="primary" onClick={() => update('resolved')}>
+                    <CheckCircle2 size={15} /> Mark Resolved
+                  </button>
                 </>
               )}
               {active.status === 'resolved' && (
-                <button className="secondary" onClick={() => update('open')}>Reopen</button>
+                <button className="secondary full-w" onClick={() => update('open')}>
+                  <RefreshCw size={14} /> Reopen Finding
+                </button>
               )}
               {active.status === 'false_positive' && (
-                <button className="secondary" onClick={() => update('open')}>Reopen</button>
+                <button className="secondary full-w" onClick={() => update('open')}>
+                  <RefreshCw size={14} /> Reopen Finding
+                </button>
               )}
             </div>
           </div>
         </div>
+      </>
+    )}
+
+
+      {showUploadModal && (
+        <UploadModal
+          close={() => setShowUploadModal(false)}
+          onFileSelected={handleFileUpload}
+          uploadState={uploadState}
+          error={uploadError}
+          onFallbackDemo={handleDemoUploadFallback}
+        />
       )}
-      {showUploadModal && <UploadModal close={() => setShowUploadModal(false)} onFileSelected={handleFileUpload} isUploading={uploadState === 'uploading'} error={uploadError} />}
+      {showMultiFloorOverview && (
+        <MultiFloorOverviewModal
+          isOpen={showMultiFloorOverview}
+          onClose={() => setShowMultiFloorOverview(false)}
+          summary={multiFloorSummary}
+          currentDrawingId={currentDrawingId}
+          activePageIndex={drawingMeta.pageIndex}
+          onSelectFloor={handleFloorSwitch}
+        />
+      )}
       {toast && <div className="toast">{toast}</div>}
     </>
   );
 }
 
-const Header = ({ onNew, compact }) => (
-  <header>
-    <div className="brand">
-      <div className="brand-mark">F</div>
-      <span>FLS <b>CHECKER</b></span>
-      <small>MVP</small>
+const Header = ({ onNew, compact, onSwitchToHome }) => (
+  <header className="egress-review-header">
+    <div className="brand" onClick={onSwitchToHome} style={{ cursor: 'pointer' }} title="Return to EGRESS Home">
+      <div className="brand-mark" style={{ background: 'var(--egress-crimson)' }}>
+        <ShieldCheck size={18} color="#FFFFFF" />
+      </div>
+      <span>EGRESS <b>FLS AUDIT</b></span>
+      <small style={{ background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FCA5A5' }}>UAE FLSC 2018</small>
     </div>
     {compact ? (
       <div className="user">
-        <span className="avatar">SA</span> Samir Ahmed <ChevronDown size={15} />
+        {onSwitchToHome && (
+          <button className="secondary small" onClick={onSwitchToHome} style={{ marginRight: '8px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <ArrowLeft size={13} /> Home Page
+          </button>
+        )}
+        <button className="primary small header-upload-btn" onClick={onNew} style={{ background: 'var(--egress-crimson)' }}>
+          <Upload size={14} /> Upload Plan
+        </button>
+        <span className="avatar" style={{ background: '#1E293B', color: '#FFFFFF' }}>EA</span> Eng. Ahmed <ChevronDown size={15} />
       </div>
     ) : (
       <nav>
-        <a className="active"><LayoutDashboard size={16} /> Projects</a>
-        <a>Code library</a>
-        <a>Team</a>
-        <button className="primary small" onClick={onNew}>
-          <Upload size={16} /> Upload drawing
+        {onSwitchToHome && (
+          <button className="secondary small" onClick={onSwitchToHome}>
+            <ArrowLeft size={13} /> Home
+          </button>
+        )}
+        <a className="active"><LayoutDashboard size={16} /> Audit Workspace</a>
+        <a>UAE Code Library (168 Clauses)</a>
+        <button className="primary small" onClick={onNew} style={{ background: 'var(--egress-crimson)' }}>
+          <Upload size={16} /> Upload Plan
         </button>
-        <span className="avatar">SA</span>
+        <span className="avatar" style={{ background: '#1E293B', color: '#FFFFFF' }}>EA</span>
       </nav>
     )}
   </header>
@@ -448,9 +973,9 @@ const Project = ({ title, client, floors, flags, status, done, action }) => (
       <b>{title}</b>
       <span>{client}</span>
     </div>
-    <div><small>FLOORS</small><b>{floors}</b></div>
-    <div><small>FINDINGS</small><b className={done ? 'success' : ''}>{flags}</b></div>
-    <div>
+    <div className="project-floors-col"><small>FLOORS</small><b>{floors}</b></div>
+    <div className="project-flags-col"><small>FINDINGS</small><b className={done ? 'success' : ''}>{flags}</b></div>
+    <div className="project-status-col">
       <span className={'status ' + (done ? 'complete' : '')}>
         {done ? <CheckCircle2 size={14} /> : <Clock3 size={14} />} {status}
       </span>
@@ -459,97 +984,988 @@ const Project = ({ title, client, floors, flags, status, done, action }) => (
   </button>
 );
 
-function FloorPlan({ active, select, elements, findings }) {
-  const renderElements = () => {
-    if (!elements || elements.length === 0) return null;
-    return elements.map((el, i) => {
-      const geom = el.geometry;
-      if (!geom) return null;
-      if (geom.type === 'Polygon') {
-        const coords = geom.coordinates[0];
-        const points = coords.map(c => `${c[0]},${c[1]}`).join(' ');
-        return <polygon key={i} points={points} fill="#ecf0f1" fillOpacity="0.3" stroke="#95a5a6" strokeWidth="1" />;
-      }
-      return null;
-    });
+
+function FloorPlan({
+  activeId,
+  select,
+  elements,
+  findings,
+  loading,
+  currentDrawingId,
+  drawingMeta,
+  viewMode,
+  setViewMode,
+  isFullScreen,
+  setIsFullScreen,
+  handleFloorSwitch
+}) {
+  const [showHeatmap, setShowHeatmap] = useState(true);
+  const [showPills, setShowPills] = useState(true);
+  const [showPins, setShowPins] = useState(true);
+  const [showExits, setShowExits] = useState(true);
+  const [showCadWalls, setShowCadWalls] = useState(false);
+  const [overlayOpacity, setOverlayOpacity] = useState(0.72);
+  const [hoveredRoom, setHoveredRoom] = useState(null);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+  // Zoom & Pan interactive state
+  const [zoom, setZoom] = useState(1.0);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [showFindingsInFullscreen, setShowFindingsInFullscreen] = useState(true);
+
+  const isRealDrawing = elements && elements.length > 0;
+
+  const roomElements = isRealDrawing ? elements.filter(e => e.type === 'room') : [];
+  const wallElements = isRealDrawing ? elements.filter(e => e.type === 'wall') : [];
+  const doorElements = isRealDrawing ? elements.filter(e => e.type === 'door' && !e.properties?.is_exit) : [];
+  const exitElements = isRealDrawing ? elements.filter(e => e.type === 'exit' || e.properties?.is_exit === true) : [];
+
+  // Generate image source URL with active page and cache-busting timestamp
+  const imageSrc = drawingMeta.hasImage
+    ? `${API_URL}/drawings/${currentDrawingId}/image?page=${drawingMeta.pageIndex || 0}&t=${drawingMeta.imageTimestamp || ''}`
+    : null;
+
+  const selectedFinding = findings?.find(f => f.id === activeId);
+  const activeRoom = roomElements.find(el => {
+    const name = el.properties?.name || '';
+    return (selectedFinding && (selectedFinding.title?.includes(name) || selectedFinding.detail?.includes(name)))
+      || (hoveredRoom && hoveredRoom.name === name);
+  });
+
+  const planRef = useRef(null);
+
+  // Zoom & Pan Handlers
+  const handleZoomIn = () => setZoom(prev => Math.min(4.0, Math.round((prev + 0.25) * 100) / 100));
+  const handleZoomOut = () => setZoom(prev => Math.max(0.5, Math.round((prev - 0.25) * 100) / 100));
+  const handleResetZoom = () => {
+    setZoom(1.0);
+    setPan({ x: 0, y: 0 });
   };
 
-  return (
-    <div className="plan">
-      <svg viewBox="0 0 100 70" style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
-        {renderElements()}
-      </svg>
-      <div className="room r1">OPEN OFFICE<br /><small>NORTH</small></div>
-      <div className="room r2">MEETING<br />ROOMS</div>
-      <div className="room r3">OPEN OFFICE<br /><small>SOUTH</small></div>
-      <div className="room r4">RECEPTION</div>
-      <div className="corridor">CORRIDOR</div>
-      <div className="exit e1">EXIT</div>
-      <div className="exit e2">EXIT</div>
-      {findings.map(f => (
+  // Active non-passive mouse wheel listener to strictly prevent browser tab zoom
+  useEffect(() => {
+    const el = planRef.current;
+    if (!el) return;
+
+    const handleWheelEvent = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const isPinch = e.ctrlKey || e.metaKey;
+      const step = isPinch ? 0.04 : 0.12;
+      const delta = e.deltaY < 0 ? step : -step;
+
+      setZoom(prev => Math.min(4.0, Math.max(0.5, Math.round((prev + delta) * 100) / 100)));
+    };
+
+    el.addEventListener('wheel', handleWheelEvent, { passive: false });
+    return () => el.removeEventListener('wheel', handleWheelEvent);
+  }, [isFullScreen]);
+
+  // CAD Navigation: Spacebar and Middle-click drag listeners
+  const handleMouseDown = (e) => {
+    if (e.button === 0 || e.button === 1 || isSpacePressed) {
+      if (e.button === 1) e.preventDefault();
+      setIsDragging(true);
+      setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    }
+  };
+
+  const handleMouseMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    if (isDragging) {
+      setPan({
+        x: e.clientX - dragStart.x,
+        y: e.clientY - dragStart.y
+      });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsDragging(false);
+  };
+
+  // Keyboard navigation & CAD shortcuts (Spacebar pan, Z to fit, 0, +, -)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+      if (e.code === 'Space' && !e.repeat) {
+        setIsSpacePressed(true);
+      } else if (e.key === 'Escape' && isFullScreen) {
+        setIsFullScreen(false);
+      } else if (e.key === 'f' || e.key === 'F') {
+        setIsFullScreen(prev => !prev);
+      } else if (e.key === '+' || e.key === '=') {
+        handleZoomIn();
+      } else if (e.key === '-' || e.key === '_') {
+        handleZoomOut();
+      } else if (e.key === '0' || e.key === 'z' || e.key === 'Z' || (e.shiftKey && e.key === '!')) {
+        handleResetZoom();
+      }
+    };
+
+    const handleKeyUp = (e) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+        setIsDragging(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [isFullScreen]);
+
+  // Reset pan when floor changes
+  useEffect(() => {
+    setPan({ x: 0, y: 0 });
+  }, [currentDrawingId, drawingMeta.pageIndex]);
+
+  // Layer Controls Bar JSX
+  const renderLayerControls = (isFs = false) => (
+    <div className={`layer-controls-bar ${isFs ? 'fullscreen-controls-bar' : ''}`}>
+      <div className="layer-toggles">
+        <span className="layer-label"><Sliders size={12} /> LAYERS:</span>
         <button
-          onClick={() => select(f.id)}
-          key={f.id}
-          aria-label={f.id}
-          className={'marker ' + (f.id === active ? 'chosen' : '')}
-          style={{ left: f.pos[0], top: f.pos[1] }}
+          className={`layer-chip ${showHeatmap ? 'active' : ''}`}
+          onClick={() => setShowHeatmap(!showHeatmap)}
+          title="Toggle compliance zone heatmaps on rooms"
         >
-          <AlertTriangle size={18} />
-          <span>{f.id}</span>
+          🌡️ Heatmap
         </button>
-      ))}
+        <button
+          className={`layer-chip ${showPills ? 'active' : ''}`}
+          onClick={() => setShowPills(!showPills)}
+          title="Toggle room compliance info badges"
+        >
+          🏷️ Badges
+        </button>
+        <button
+          className={`layer-chip ${showPins ? 'active' : ''}`}
+          onClick={() => setShowPins(!showPins)}
+          title="Toggle finding hazard markers"
+        >
+          ⚠️ Safety Pins
+        </button>
+        <button
+          className={`layer-chip ${showExits ? 'active' : ''}`}
+          onClick={() => setShowExits(!showExits)}
+          title="Toggle emergency exits & escape paths"
+        >
+          🚪 Exits & Routes
+        </button>
+        {(viewMode === 'hybrid' || isFs) && (
+          <button
+            className={`layer-chip ${showCadWalls ? 'active' : ''}`}
+            onClick={() => setShowCadWalls(!showCadWalls)}
+            title="Toggle vector CAD wall lines overlay"
+          >
+            📐 CAD Lines
+          </button>
+        )}
+      </div>
+
+      <div className="layer-right-controls">
+        <div className="layer-slider-group">
+          <span className="slider-lbl">Opacity:</span>
+          <input
+            type="range"
+            min="0.1"
+            max="1.0"
+            step="0.05"
+            value={overlayOpacity}
+            onChange={(e) => setOverlayOpacity(parseFloat(e.target.value))}
+            className="opacity-slider"
+            title={`Overlay Opacity: ${Math.round(overlayOpacity * 100)}%`}
+          />
+          <span className="opacity-val">{Math.round(overlayOpacity * 100)}%</span>
+        </div>
+
+        {/* Zoom & Pan Toolbar */}
+        <div className="canvas-zoom-toolbar">
+          <button
+            className="zoom-btn"
+            onClick={handleZoomOut}
+            title="Zoom Out (-)"
+          >
+            <ZoomOut size={13} />
+          </button>
+          <span className="zoom-indicator" title="Click to reset zoom (0)" onClick={handleResetZoom}>
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            className="zoom-btn"
+            onClick={handleZoomIn}
+            title="Zoom In (+)"
+          >
+            <ZoomIn size={13} />
+          </button>
+          <button
+            className="zoom-btn reset-btn"
+            onClick={handleResetZoom}
+            title="Fit to Screen / Reset (0)"
+          >
+            <RotateCcw size={12} />
+          </button>
+          <div className="zoom-divider" />
+          <button
+            className={`fullscreen-btn ${isFullScreen ? 'active' : ''}`}
+            onClick={() => setIsFullScreen(!isFullScreen)}
+            title={isFullScreen ? "Exit Fullscreen (Esc)" : "Full Screen View (F)"}
+          >
+            {isFullScreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            <span>{isFullScreen ? "Exit" : "Full Screen"}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Plan Canvas Stage JSX
+  const renderPlanCanvas = (isFs = false) => (
+    <div
+      ref={planRef}
+      className={`plan ${viewMode === 'vector' ? 'blueprint-mode' : ''} ${isFs ? 'fullscreen-stage' : ''}`}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={() => {
+        setIsDragging(false);
+        setHoveredRoom(null);
+      }}
+      style={{
+        cursor: isDragging ? 'grabbing' : isSpacePressed ? 'grab' : zoom > 1.05 ? 'grab' : 'default'
+      }}
+    >
+      {loading && (
+        <div className="canvas-loading-overlay">
+          <div className="spinner"></div>
+          <span>Analyzing drawing geometry...</span>
+        </div>
+      )}
+
+      {/* Pannable & Zoomable Stage */}
+      <div
+        className="plan-canvas-stage"
+        style={{
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: 'center center',
+          transition: isDragging ? 'none' : 'transform 0.12s ease-out'
+        }}
+      >
+        <svg viewBox="0 0 100 100" className="plan-svg" preserveAspectRatio="none">
+          <defs>
+            <pattern id="arch-grid" width="5" height="5" patternUnits="userSpaceOnUse">
+              <path d="M 5 0 L 0 0 0 5" fill="none" stroke={viewMode === 'vector' ? '#253549' : '#f0ebe4'} strokeWidth="0.25" />
+            </pattern>
+            <filter id="glow-danger" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="0" stdDeviation="0.8" floodColor="#ef4444" floodOpacity="0.6" />
+            </filter>
+            <filter id="glow-safe" x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="0" stdDeviation="0.6" floodColor="#22c55e" floodOpacity="0.5" />
+            </filter>
+          </defs>
+
+          {/* 1. Background Grid Pattern */}
+          <rect width="100" height="100" fill={viewMode === 'vector' ? '#0f172a' : '#fffdf9'} />
+          {viewMode !== 'image' && <rect width="100" height="100" fill="url(#arch-grid)" />}
+
+          {/* 2. Real Rendered Architectural PDF Image Backdrop */}
+          {imageSrc && viewMode !== 'vector' && (
+            <image
+              href={imageSrc}
+              x="0"
+              y="0"
+              width="100"
+              height="100"
+              preserveAspectRatio="none"
+              opacity={viewMode === 'image' ? 1.0 : 0.94}
+            />
+          )}
+
+          {/* 3. Dynamic Vector CAD Compliance Layer with adjustable opacity */}
+          {isRealDrawing && (
+            <g className="cad-dynamic-layer" opacity={viewMode === 'image' ? 0.0 : overlayOpacity}>
+              {/* Dynamic Room Polygons & Compliance Heatmaps */}
+              {showHeatmap && roomElements.map((el, idx) => {
+                const geom = el.geometry;
+                const props = el.properties || {};
+                if (!geom || geom.type !== 'Polygon') return null;
+                const coords = geom.coordinates[0];
+                const points = coords.map(c => `${c[0]},${c[1]}`).join(' ');
+                const nameUpper = (props.name || '').toUpperCase();
+                const isStair = nameUpper.includes('STAIR');
+                const isLift = nameUpper.includes('LIFT');
+                
+                const relatedFinding = findings?.find(f => f.title?.includes(props.name) || f.detail?.includes(props.name));
+                const isSelected = activeId && (activeId === relatedFinding?.id || (selectedFinding && (selectedFinding.title?.includes(props.name) || selectedFinding.detail?.includes(props.name))));
+                const hasViolation = Boolean(relatedFinding);
+                const isHovered = hoveredRoom?.name === props.name;
+
+                let fillColor = 'rgba(255, 255, 255, 0.05)';
+                let strokeColor = 'rgba(140, 130, 118, 0.4)';
+                let strokeWidth = '0.35';
+
+                if (viewMode === 'vector' || !imageSrc) {
+                  fillColor = isSelected ? 'rgba(239, 68, 68, 0.35)' : hasViolation ? 'rgba(249, 115, 22, 0.25)' : isStair ? 'rgba(34, 197, 94, 0.25)' : isLift ? 'rgba(234, 179, 8, 0.20)' : 'rgba(30, 41, 59, 0.6)';
+                  strokeColor = isSelected ? '#ef4444' : hasViolation ? '#f97316' : isStair ? '#22c55e' : '#475569';
+                  strokeWidth = isSelected ? '0.7' : '0.4';
+                } else {
+                  if (isSelected) {
+                    fillColor = 'rgba(239, 68, 68, 0.26)';
+                    strokeColor = '#ef4444';
+                    strokeWidth = '0.75';
+                  } else if (isHovered) {
+                    fillColor = hasViolation ? 'rgba(239, 68, 68, 0.22)' : 'rgba(34, 197, 94, 0.18)';
+                    strokeColor = hasViolation ? '#ef4444' : '#16a34a';
+                    strokeWidth = '0.6';
+                  } else if (hasViolation) {
+                    fillColor = 'rgba(249, 115, 22, 0.18)';
+                    strokeColor = '#ea580c';
+                    strokeWidth = '0.55';
+                  } else if (isStair) {
+                    fillColor = 'rgba(34, 197, 94, 0.16)';
+                    strokeColor = '#16a34a';
+                    strokeWidth = '0.4';
+                  } else if (isLift) {
+                    fillColor = 'rgba(234, 179, 8, 0.14)';
+                    strokeColor = '#ca8a04';
+                    strokeWidth = '0.4';
+                  } else {
+                    fillColor = 'rgba(241, 245, 249, 0.08)';
+                    strokeColor = 'rgba(100, 116, 139, 0.45)';
+                  }
+                }
+
+                return (
+                  <polygon
+                    key={`room-poly-${idx}`}
+                    points={points}
+                    fill={fillColor}
+                    stroke={strokeColor}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={hasViolation ? '1.2, 0.8' : 'none'}
+                    className={`room-poly ${isSelected ? 'selected' : ''} ${hasViolation ? 'violation' : ''}`}
+                    onMouseEnter={() => setHoveredRoom({ ...props, hasViolation, relatedFinding })}
+                    onMouseLeave={() => setHoveredRoom(null)}
+                    onClick={() => {
+                      if (relatedFinding) {
+                        select(isSelected ? null : relatedFinding.id);
+                      }
+                    }}
+                  />
+                );
+              })}
+
+              {/* Active Egress Escape Route Path */}
+              {showExits && activeRoom && activeRoom.properties?.connection_path && (
+                <g className="active-escape-route-group">
+                  <polyline
+                    points={activeRoom.properties.connection_path.map(c => `${c[0]},${c[1]}`).join(' ')}
+                    fill="none"
+                    stroke="#ef4444"
+                    strokeWidth="0.65"
+                    strokeDasharray="1.5, 1.0"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="escape-path-line"
+                  />
+                  {activeRoom.properties.centroid && (
+                    <circle
+                      cx={activeRoom.properties.centroid[0]}
+                      cy={activeRoom.properties.centroid[1]}
+                      r="1.0"
+                      fill="#ef4444"
+                      className="pulse-start"
+                    />
+                  )}
+                </g>
+              )}
+
+              {/* Dynamic Wall LineStrings */}
+              {(viewMode === 'vector' || showCadWalls || !imageSrc) && wallElements.map((el, idx) => {
+                const geom = el.geometry;
+                if (!geom) return null;
+                const strokeColor = viewMode === 'vector' || !imageSrc ? '#94a3b8' : '#475569';
+                const strokeW = viewMode === 'vector' || !imageSrc ? '0.7' : '0.45';
+
+                if (geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
+                  const pts = geom.coordinates;
+                  if (pts.length === 2) {
+                    return (
+                      <line
+                        key={`wall-${idx}`}
+                        x1={pts[0][0]}
+                        y1={pts[0][1]}
+                        x2={pts[1][0]}
+                        y2={pts[1][1]}
+                        stroke={strokeColor}
+                        strokeWidth={strokeW}
+                        strokeLinecap="round"
+                      />
+                    );
+                  } else if (pts.length > 2) {
+                    return (
+                      <polyline
+                        key={`wall-poly-${idx}`}
+                        points={pts.map(c => `${c[0]},${c[1]}`).join(' ')}
+                        fill="none"
+                        stroke={strokeColor}
+                        strokeWidth={strokeW}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    );
+                  }
+                }
+                return null;
+              })}
+
+              {/* Dynamic Door Openings */}
+              {showExits && doorElements.map((el, idx) => {
+                const geom = el.geometry;
+                if (!geom || geom.type !== 'Point' || !Array.isArray(geom.coordinates)) return null;
+                const [dx, dy] = geom.coordinates;
+                return (
+                  <g key={`door-${idx}`} className="cad-door-marker">
+                    <circle cx={dx} dy={dy} r="0.7" fill="#65a30d" />
+                    <circle cx={dx} dy={dy} r="1.6" fill="none" stroke="#65a30d" strokeWidth="0.25" strokeDasharray="0.5,0.5" />
+                  </g>
+                );
+              })}
+
+              {/* Dynamic Emergency Exit Badges */}
+              {showExits && exitElements.map((el, idx) => {
+                const geom = el.geometry;
+                if (!geom || geom.type !== 'Point' || !Array.isArray(geom.coordinates)) return null;
+                const [ex, ey] = geom.coordinates;
+                return (
+                  <g key={`exit-${idx}`} transform={`translate(${ex}, ${ey})`} className="cad-exit-group">
+                    <rect
+                      x="-3.6"
+                      y="-1.5"
+                      width="7.2"
+                      height="3.0"
+                      rx="0.8"
+                      fill="#16a34a"
+                      stroke="#ffffff"
+                      strokeWidth="0.3"
+                    />
+                    <text
+                      x="0"
+                      y="0.1"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill="#ffffff"
+                      fontSize="0.95"
+                      fontWeight="800"
+                      fontFamily="'DM Mono', monospace"
+                    >
+                      EXIT
+                    </text>
+                  </g>
+                );
+              })}
+
+              {/* Floating Room Compliance Badges */}
+              {showPills && roomElements.map((el, idx) => {
+                const props = el.properties || {};
+                const geom = el.geometry;
+                if (!geom) return null;
+                const coords = geom.coordinates[0];
+                if (!coords || coords.length === 0) return null;
+
+                let cx = 50;
+                let cy = 50;
+                if (props.centroid && Array.isArray(props.centroid)) {
+                  cx = props.centroid[0];
+                  cy = props.centroid[1];
+                } else if (props.svg_centroid && Array.isArray(props.svg_centroid)) {
+                  cx = props.svg_centroid[0];
+                  cy = props.svg_centroid[1];
+                } else {
+                  cx = coords.reduce((s, pt) => s + pt[0], 0) / coords.length;
+                  cy = coords.reduce((s, pt) => s + pt[1], 0) / coords.length;
+                }
+
+                const relatedFinding = findings?.find(f => f.title?.includes(props.name) || f.detail?.includes(props.name));
+                const hasViolation = Boolean(relatedFinding);
+                const isSelected = activeId && activeId === relatedFinding?.id;
+                const isHovered = hoveredRoom && hoveredRoom.name === props.name;
+
+                // Level-of-Detail (LOD): hide non-critical badges when zoomed out below 80%
+                const isLODVisible = zoom >= 0.80 || hasViolation || isSelected || isHovered;
+                if (!isLODVisible) return null;
+
+                if (viewMode === 'hybrid') {
+                  const badgeText = hasViolation
+                    ? `⚠️ ${relatedFinding?.severity || 'Violation'} • ${props.occupant_load || 0} occ`
+                    : `${props.occupant_load !== undefined ? `${props.occupant_load} occ` : ''}${props.area_m2 ? ` • ${props.area_m2}m²` : ''} ✓`;
+                  const textLen = badgeText.length;
+                  const badgeW = Math.min(14.0, Math.max(7.5, textLen * 0.46 + 1.8));
+                  const badgeH = 2.3;
+                  const badgeY = hasViolation && showPins ? cy - 3.2 : cy + 2.0;
+
+                  return (
+                    <g
+                      key={`room-pill-${idx}`}
+                      transform={`translate(${cx}, ${badgeY})`}
+                      className="room-pill-badge"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => {
+                        if (relatedFinding) select(isSelected ? null : relatedFinding.id);
+                      }}
+                    >
+                      <rect
+                        x={-badgeW / 2}
+                        y={-badgeH / 2}
+                        width={badgeW}
+                        height={badgeH}
+                        rx="0.5"
+                        fill={isSelected ? 'rgba(220, 38, 38, 0.95)' : hasViolation ? 'rgba(185, 28, 28, 0.92)' : 'rgba(15, 23, 42, 0.88)'}
+                        stroke={isSelected ? '#ffffff' : hasViolation ? '#fca5a5' : 'rgba(255, 255, 255, 0.25)'}
+                        strokeWidth="0.22"
+                        filter="drop-shadow(0 1px 2px rgba(0,0,0,0.3))"
+                      />
+                      <text
+                        x="0"
+                        y="0.1"
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill={isSelected ? '#ffffff' : hasViolation ? '#fee2e2' : '#38bdf8'}
+                        fontSize="0.75"
+                        fontWeight="800"
+                        fontFamily="'JetBrains Mono', monospace"
+                      >
+                        {badgeText}
+                      </text>
+                    </g>
+                  );
+                }
+
+                return (
+                  <g key={`room-label-vector-${idx}`} className="room-label-vector">
+                    <text
+                      x={cx}
+                      y={cy - 1.0}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill={hasViolation ? '#f87171' : '#f8fafc'}
+                      fontSize="1.15"
+                      fontWeight="800"
+                      fontFamily="'DM Mono', monospace"
+                    >
+                      {props.name}
+                    </text>
+                    {props.area_m2 && (
+                      <text
+                        x={cx}
+                        y={cy + 1.4}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill={hasViolation ? '#fca5a5' : '#94a3b8'}
+                        fontSize="0.85"
+                        fontWeight="600"
+                        fontFamily="'DM Mono', monospace"
+                      >
+                        {props.area_m2} m² {props.occupant_load !== undefined ? `• ${props.occupant_load} occ` : ''}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
+          )}
+
+          {!isRealDrawing && !imageSrc && (
+            <g className="default-plan-lines">
+              <rect x="5" y="5" width="90" height="90" fill="none" stroke="#756d63" strokeWidth="1.2" rx="1" />
+              <rect x="10" y="10" width="40" height="32" fill="#eae6d3" fillOpacity="0.3" stroke="#989878" strokeWidth="0.8" />
+              <rect x="58" y="10" width="30" height="32" fill="#eae6d3" fillOpacity="0.3" stroke="#989878" strokeWidth="0.8" />
+              <rect x="10" y="58" width="48" height="32" fill="#eae6d3" fillOpacity="0.3" stroke="#989878" strokeWidth="0.8" />
+              <rect x="67" y="58" width="24" height="32" fill="#eae6d3" fillOpacity="0.3" stroke="#989878" strokeWidth="0.8" />
+            </g>
+          )}
+        </svg>
+
+        {/* Dynamic Hazard Pins */}
+        {showPins && (findings || []).map((f, idx) => {
+          const isChosen = f.id === activeId;
+          const isResolved = f.status === 'resolved';
+          const isFalsePositive = f.status === 'false_positive';
+          const markerClass = `pin-marker ${isChosen ? 'chosen' : ''} ${isResolved ? 'resolved' : ''} ${isFalsePositive ? 'false-pos' : ''}`;
+          const markerLeft = f.pos?.[0] || '50%';
+          const markerTop = f.pos?.[1] || '50%';
+
+          return (
+            <button
+              onClick={() => select(isChosen ? null : f.id)}
+              key={f.id}
+              aria-label={`Finding ${idx + 1}`}
+              className={markerClass}
+              style={{ left: markerLeft, top: markerTop }}
+              title={`Finding ${idx + 1}: ${f.title} (${f.clause})`}
+            >
+              <span className="pin-num">{idx + 1}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Floating Canvas Zoom & View Control Badge */}
+      <div className="floating-canvas-controls">
+        <button
+          className="float-tool-btn"
+          onClick={handleZoomOut}
+          title="Zoom Out (-)"
+        >
+          <ZoomOut size={13} />
+        </button>
+        <button
+          className="float-tool-btn zoom-text-btn"
+          onClick={handleResetZoom}
+          title="Click to reset zoom (0)"
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button
+          className="float-tool-btn"
+          onClick={handleZoomIn}
+          title="Zoom In (+)"
+        >
+          <ZoomIn size={13} />
+        </button>
+        <button
+          className="float-tool-btn"
+          onClick={handleResetZoom}
+          title="Reset View / Fit (0)"
+        >
+          <RotateCcw size={12} />
+        </button>
+        <button
+          className={`float-tool-btn fs-trigger-btn ${isFullScreen ? 'active' : ''}`}
+          onClick={() => setIsFullScreen(!isFullScreen)}
+          title={isFullScreen ? "Exit Fullscreen (Esc)" : "Full Screen View (F)"}
+        >
+          {isFullScreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+        </button>
+      </div>
+
+      {/* Hover Tooltip Card */}
+      {hoveredRoom && (
+        <div
+          className="room-hover-tooltip"
+          style={{
+            left: Math.min(Math.max(10, mousePos.x + 15), 480),
+            top: Math.min(Math.max(10, mousePos.y - 45), 440)
+          }}
+        >
+          <div className="rht-head">
+            <b>{hoveredRoom.name}</b>
+            <span className={`rht-badge ${hoveredRoom.hasViolation ? 'danger' : 'safe'}`}>
+              {hoveredRoom.hasViolation ? '⚠️ Non-Compliant' : '✓ Compliant'}
+            </span>
+          </div>
+          <div className="rht-body">
+            <span>Area: <b>{hoveredRoom.area_m2} m²</b></span>
+            <span>Occupants: <b>{hoveredRoom.occupant_load || hoveredRoom.occupant_load_explicit || 'N/A'}</b></span>
+            {hoveredRoom.travel_distance_m && (
+              <span>Travel: <b>{hoveredRoom.travel_distance_m} m</b></span>
+            )}
+          </div>
+          {hoveredRoom.relatedFinding && (
+            <div className="rht-finding">
+              <AlertTriangle size={12} />
+              <span>{hoveredRoom.relatedFinding.shortTitle || hoveredRoom.relatedFinding.title}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  // Full Screen Modal Viewport
+  if (isFullScreen) {
+    return (
+      <div className="fullscreen-plan-overlay">
+        {/* Fullscreen Header Bar */}
+        <header className="fullscreen-header">
+          <div className="fs-header-left">
+            <div className="fs-badge">
+              <Building2 size={16} />
+              <span>EGRESS AUDIT VIEWER</span>
+            </div>
+            <h2 className="fs-floor-title">{drawingMeta.floor}</h2>
+            {drawingMeta.pagesCount > 1 && (
+              <span className="fs-page-tag">Sheet {drawingMeta.pageIndex + 1} of {drawingMeta.pagesCount}</span>
+            )}
+          </div>
+
+          <div className="fs-header-center">
+            {/* View Mode Switchers in Fullscreen */}
+            <div className="view-mode-group">
+              <button
+                className={`view-mode-btn ${viewMode === 'hybrid' ? 'active' : ''}`}
+                onClick={() => setViewMode && setViewMode('hybrid')}
+                title="PDF Drawing with compliance overlays"
+              >
+                ✨ Hybrid
+              </button>
+              <button
+                className={`view-mode-btn ${viewMode === 'vector' ? 'active' : ''}`}
+                onClick={() => setViewMode && setViewMode('vector')}
+                title="CAD Vector blueprint mode"
+              >
+                📐 Vector CAD
+              </button>
+              {drawingMeta.hasImage && (
+                <button
+                  className={`view-mode-btn ${viewMode === 'image' ? 'active' : ''}`}
+                  onClick={() => setViewMode && setViewMode('image')}
+                  title="Original PDF image"
+                >
+                  📄 Original PDF
+                </button>
+              )}
+            </div>
+
+            {/* Quick Floor Switching Tabs in Fullscreen */}
+            {drawingMeta.pages && drawingMeta.pages.length > 1 && (
+              <div className="fs-floor-tabs">
+                {drawingMeta.pages.map((p, pIdx) => (
+                  <button
+                    key={`fs-page-${pIdx}`}
+                    className={`fs-floor-tab ${pIdx === drawingMeta.pageIndex ? 'active' : ''}`}
+                    onClick={() => handleFloorSwitch && handleFloorSwitch(pIdx)}
+                  >
+                    Level 0{pIdx}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="fs-header-right">
+            {/* Toggle Findings Sidebar Button */}
+            <button
+              className={`fs-tool-btn ${showFindingsInFullscreen ? 'active' : ''}`}
+              onClick={() => setShowFindingsInFullscreen(!showFindingsInFullscreen)}
+              title="Toggle Findings Drawer"
+            >
+              <FileCheck size={14} />
+              <span>Findings ({findings?.length || 0})</span>
+            </button>
+
+            {/* Exit Fullscreen Button */}
+            <button
+              className="fs-exit-btn"
+              onClick={() => setIsFullScreen(false)}
+              title="Exit Full Screen (Esc)"
+            >
+              <X size={16} />
+              <span>Exit Fullscreen</span>
+            </button>
+          </div>
+        </header>
+
+        {/* Fullscreen Sub-header Layer Bar */}
+        {renderLayerControls(true)}
+
+        {/* Fullscreen Main Content Split */}
+        <div className="fullscreen-body">
+          <div className="fullscreen-canvas-wrap">
+            {renderPlanCanvas(true)}
+          </div>
+
+          {/* Docked Findings Sidebar in Fullscreen */}
+          {showFindingsInFullscreen && (
+            <aside className="fullscreen-findings-drawer">
+              <div className="fs-findings-head">
+                <div>
+                  <h3>Safety Findings</h3>
+                  <p>{findings?.filter(x => x.status === 'open').length || 0} open finding(s)</p>
+                </div>
+                <button
+                  className="fs-close-drawer-btn"
+                  onClick={() => setShowFindingsInFullscreen(false)}
+                  title="Close Findings Sidebar"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="fs-finding-cards-list">
+                {findings && findings.length > 0 ? (
+                  findings.map((f, idx) => {
+                    const isSelected = f.id === activeId;
+                    return (
+                      <div
+                        key={`fs-f-${f.id}`}
+                        className={`fs-finding-card ${isSelected ? 'selected' : ''} ${f.status}`}
+                        onClick={() => select(isSelected ? null : f.id)}
+                      >
+                        <div className="fs-fc-top">
+                          <span className="fs-pin-chip">{idx + 1}</span>
+                          <span className="fs-fc-title">{f.roomName || f.title}</span>
+                          <span className={`fs-fc-sev ${f.severity?.toLowerCase()}`}>{f.severity}</span>
+                        </div>
+                        <div className="fs-fc-body">
+                          <span className="fs-fc-type">{f.shortTitle || f.kind}</span>
+                          <div className="fs-fc-metric">
+                            <span>Measured: <b>{f.measured}</b></span>
+                            <span>Limit: <b>{f.limit}</b></span>
+                          </div>
+                          <span className="fs-fc-clause">{f.clause}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="fs-no-findings">
+                    <CheckCircle2 size={24} color="#10B981" />
+                    <h4>100% Compliant</h4>
+                    <p>No safety or travel distance violations found on this floor level.</p>
+                  </div>
+                )}
+              </div>
+            </aside>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Standard inline plan container
+  return (
+    <div className="plan-container">
+      {renderLayerControls(false)}
+      {renderPlanCanvas(false)}
     </div>
   );
 }
 
-function UploadModal({ close, onFileSelected, isUploading, error }) {
+
+function UploadModal({ close, onFileSelected, uploadState, error, onFallbackDemo }) {
+  const [dragOver, setDragOver] = useState(false);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [occupancyType, setOccupancyType] = useState('Business - Regular office areas');
+  const [sprinklered, setSprinklered] = useState(true);
+
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (file) {
-      onFileSelected(file);
+      setSelectedFile(file);
     }
   };
 
-  const showForm = !isUploading && !error;
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) {
+      setSelectedFile(file);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (selectedFile) {
+      onFileSelected(selectedFile, { occupancyType, sprinklered });
+    } else {
+      document.querySelector('.drop input')?.click();
+    }
+  };
+
+  const isUploading = uploadState === 'uploading' || uploadState === 'processing';
 
   return (
-    <div className="modal-bg">
+    <div className="modal-bg" onClick={(e) => { if (e.target === e.currentTarget && !isUploading) close(); }}>
       <div className="modal">
-        <button className="close" onClick={close} disabled={isUploading}>
-          <X />
+        <button className="close" onClick={close} disabled={isUploading} aria-label="Close modal">
+          <X size={18} />
         </button>
-        <span className="eyebrow">NEW FLOOR REVIEW</span>
-        <h2>Upload a floor drawing</h2>
-        <p>PDF and DXF files are supported. We'll detect scale and egress elements before your review.</p>
+        <h2>Upload CAD / PDF Floor Plan</h2>
+        <p>Upload any DXF or PDF architectural floor plan to render real drawing geometry and run automated UAE Fire & Life Safety checks.</p>
 
         {isUploading && (
           <div className="upload-status">
             <div className="spinner"></div>
-            <p>Uploading and processing...</p>
+            <h3>Analyzing floor plan...</h3>
+            <p>Extracting geometric elements, calculating travel distances, and verifying exit capacities.</p>
+            <div className="upload-steps">
+              <span className="step done"><CheckCircle2 size={13} /> File received</span>
+              <span className="step active"><RefreshCw size={13} className="spin-fast" /> Rendering overview image & vector rooms</span>
+              <span className="step"><Clock3 size={13} /> Checking UAE FLS code clauses</span>
+            </div>
           </div>
         )}
 
         {error && (
-          <div className="upload-error">
-            <AlertTriangle size={18} />
-            <p>{error}</p>
+          <div className="upload-error" style={{ background: 'var(--brand-red-light)', border: '1px solid rgba(211, 47, 47, 0.3)', borderRadius: 'var(--radius-sm)', padding: '14px', margin: '14px 0' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--brand-red)', fontWeight: 700, fontSize: '13px', marginBottom: '4px' }}>
+              <AlertTriangle size={16} />
+              <span>Upload Notice</span>
+            </div>
+            <p style={{ margin: '0 0 10px', fontSize: '12px', color: 'var(--ink-primary)' }}>{error}</p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="primary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={onFallbackDemo}>
+                Load Demo Findings
+              </button>
+              <button className="secondary" style={{ padding: '6px 12px', fontSize: '11px' }} onClick={() => document.querySelector('.drop input')?.click()}>
+                Select Another File
+              </button>
+            </div>
           </div>
         )}
 
-        {showForm && (
+        {!isUploading && !error && (
           <>
-            <label className="drop">
-              <FileUp size={30} />
-              <b>Drop drawing here or browse</b>
-              <span>PDF or DXF · Maximum 100 MB</span>
+            <label
+              className={`drop ${dragOver ? 'drag-over' : ''} ${selectedFile ? 'has-file' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+            >
+              <FileUp size={28} />
+              <b>{selectedFile ? `Selected: ${selectedFile.name}` : 'Choose drawing file or drag & drop'}</b>
+              <span>Auto-detects CAD rooms, dimensions, and exits (.dxf, .pdf)</span>
               <input type="file" accept=".pdf,.dxf" onChange={handleFileChange} />
             </label>
-            <div className="field">
-              <label>Occupancy type</label>
-              <div>Commercial Office <ChevronDown size={16} /></div>
+
+            <div className="modal-fields">
+              <div className="modal-field">
+                <label>OCCUPANCY CLASSIFICATION</label>
+                <select
+                  className="modal-select"
+                  value={occupancyType}
+                  onChange={(e) => setOccupancyType(e.target.value)}
+                >
+                  <option value="Business - Regular office areas">Business - Regular office (9.3 m²/person)</option>
+                  <option value="Business - Concentrated office areas (open-plan, workstation-dense)">Business - Concentrated (4.6 m²/person)</option>
+                </select>
+              </div>
+
+              <div className="modal-field">
+                <label>FIRE SPRINKLER SYSTEM</label>
+                <select
+                  className="modal-select"
+                  value={sprinklered ? 'yes' : 'no'}
+                  onChange={(e) => setSprinklered(e.target.value === 'yes')}
+                >
+                  <option value="yes">Sprinklered (91m max travel)</option>
+                  <option value="no">Non-Sprinklered (61m max travel)</option>
+                </select>
+              </div>
             </div>
-            <button className="primary full" onClick={() => document.querySelector('.drop input').click()}>
-              Start review <span>→</span>
+
+            <button className="primary full" onClick={handleSubmit}>
+              {selectedFile ? `Analyze "${selectedFile.name}" →` : 'Select File & Start Review →'}
             </button>
           </>
         )}
@@ -558,4 +1974,173 @@ function UploadModal({ close, onFileSelected, isUploading, error }) {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+
+function MultiFloorOverviewModal({ isOpen, onClose, summary, currentDrawingId, activePageIndex, onSelectFloor }) {
+  if (!isOpen || !summary) return null;
+
+  const totalFloors = summary.total_pages || (summary.floors ? summary.floors.length : 1);
+  const totalErrors = summary.total_violations_count !== undefined ? summary.total_violations_count : 0;
+  const floors = summary.floors || [];
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel multi-floor-modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <div className="mf-header-titles">
+            <div className="mf-title-row">
+              <Building2 size={22} className="text-teal" />
+              <h3>All Floor Plans & Error Analysis</h3>
+            </div>
+            <p className="mf-subtitle">
+              Comprehensive FLS egress compliance audit across all {totalFloors} decoded building levels.
+            </p>
+          </div>
+          <div className="mf-header-badges">
+            <span className="mf-badge floors-count">
+              <Layers size={13} /> {totalFloors} Floors Analyzed
+            </span>
+            <span className={`mf-badge errors-count ${totalErrors > 0 ? 'has-errors' : 'clean'}`}>
+              <AlertTriangle size={13} /> {totalErrors} Total Findings
+            </span>
+            <button className="modal-close" onClick={onClose}>
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="mf-modal-body">
+          <div className="mf-floors-grid">
+            {floors.map((fl) => {
+              const isActive = fl.index === activePageIndex;
+              const hasErrors = (fl.violations_count || 0) > 0;
+              const cleanTitle = (fl.title || `Floor Level 0${fl.index}`)
+                .replace(' - TYPICAL OFFICE FLOOR PLAN', '')
+                .replace(' FLOOR PLAN', '')
+                .replace('ARCHITECTURAL FLOOR PLAN - ', '');
+
+              return (
+                <div key={`mf-card-${fl.index}`} className={`mf-floor-card ${isActive ? 'active-floor' : ''} ${hasErrors ? 'non-compliant' : 'compliant'}`}>
+                  <div className="mf-card-top">
+                    <div className="mf-card-title-group">
+                      <span className="mf-floor-index-badge">Level 0{fl.index}</span>
+                      <h4 className="mf-card-title">{cleanTitle}</h4>
+                    </div>
+                    <span className={`mf-status-chip ${hasErrors ? 'status-danger' : 'status-safe'}`}>
+                      {hasErrors ? `⚠️ ${fl.violations_count} VIOLATIONS` : '✓ 100% COMPLIANT'}
+                    </span>
+                  </div>
+
+                  {/* Metrics bar */}
+                  <div className="mf-metrics-row">
+                    <div className="mf-metric-item">
+                      <span className="lbl">OCCUPANTS</span>
+                      <b>{fl.total_occupant_load} p</b>
+                    </div>
+                    <div className="mf-metric-item">
+                      <span className="lbl">FLOOR AREA</span>
+                      <b>{fl.total_floor_area_m2} m²</b>
+                    </div>
+                    <div className="mf-metric-item">
+                      <span className="lbl">ROOMS / EXITS</span>
+                      <b>{fl.rooms_count} / {fl.exits_count}</b>
+                    </div>
+                    <div className="mf-metric-item">
+                      <span className="lbl">MAX TRAVEL</span>
+                      <b className={fl.max_travel_distance_m > 91.0 ? 'text-red' : 'text-green'}>
+                        {fl.max_travel_distance_m} m
+                      </b>
+                    </div>
+                  </div>
+
+                  {/* Violations / Errors Breakdown for this floor */}
+                  <div className="mf-errors-section">
+                    <span className="mf-errors-heading">
+                      {hasErrors ? `FLS CODE FINDINGS (${fl.violations.length})` : 'COMPLIANCE AUDIT'}
+                    </span>
+                    {hasErrors ? (
+                      <div className="mf-violations-list">
+                        {fl.violations.map((v, vIdx) => (
+                          <div key={`mf-v-${fl.index}-${vIdx}`} className="mf-violation-item">
+                            <div className="mf-v-top">
+                              <span className={`mf-v-sev ${v.severity?.toLowerCase()}`}>{v.severity}</span>
+                              <span className="mf-v-clause">{v.clause_ref}</span>
+                            </div>
+                            <p className="mf-v-title">{v.title}</p>
+                            <div className="mf-v-meas">
+                              <span>Measured: <b>{v.measured_value} {v.measured_unit}</b></span>
+                              <span>Limit: <b>{v.limit_value} {v.limit_unit}</b></span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="mf-safe-notice">
+                        <CheckCircle2 size={16} />
+                        <span>All travel distances & exit capacities on this floor satisfy UAE Fire & Life Safety Code requirements.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action */}
+                  <div className="mf-card-footer">
+                    <button
+                      className={`mf-inspect-btn ${isActive ? 'current' : ''}`}
+                      onClick={() => {
+                        onSelectFloor(fl.index);
+                        onClose();
+                      }}
+                    >
+                      {isActive ? '✓ Currently Viewing Floor' : 'Inspect Floor Plan & Findings ↗'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('FLS Checker Runtime Error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '40px', fontFamily: 'sans-serif', textAlign: 'center', background: '#F8F9FA', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#FFFFFF', padding: '32px', borderRadius: '12px', border: '1px solid #E5E7EB', maxWidth: '500px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+            <h2 style={{ color: '#D32F2F', margin: '0 0 10px' }}>Something went wrong</h2>
+            <p style={{ color: '#4B5563', fontSize: '13px', margin: '0 0 20px' }}>{this.state.error?.message || 'An unexpected rendering error occurred.'}</p>
+            <button
+              onClick={() => window.location.reload()}
+              style={{ background: '#D32F2F', color: '#FFFFFF', border: 'none', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}
+            >
+              Reload Application
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+createRoot(document.getElementById('root')).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);

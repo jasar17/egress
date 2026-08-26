@@ -18,17 +18,21 @@ except ImportError:
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
-DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or os.getenv("SUPABASE_DATABASE_URL")
 SQLITE_DB_PATH = Path(os.getenv("FLS_DATABASE_PATH", DATA_DIR / "fls_demo.db"))
 
 
+def get_raw_db_url() -> Optional[str]:
+    return os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or os.getenv("SUPABASE_DATABASE_URL")
+
+
 def is_postgres() -> bool:
-    return bool(DATABASE_URL and (DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")))
+    url = get_raw_db_url()
+    return bool(url and (url.startswith("postgres://") or url.startswith("postgresql://")))
 
 
 def get_postgres_url() -> str:
-    url = DATABASE_URL or ""
-    # Render and Supabase sometimes provide postgres:// which psycopg2 requires as postgresql://
+    url = get_raw_db_url() or ""
+    # Render and Supabase often provide postgres:// which psycopg2 requires as postgresql://
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
     return url

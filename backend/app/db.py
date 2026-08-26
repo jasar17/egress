@@ -23,6 +23,8 @@ DEFAULT_SUPABASE_URL = "postgresql://postgres.xtppmnmpunfflnxrfinb:a%26WHy9%25K4
 
 
 def get_raw_db_url() -> Optional[str]:
+    if os.getenv("USE_LOCAL_SQLITE") == "1" or os.getenv("DATABASE_URL") == "sqlite":
+        return None
     return os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or DEFAULT_SUPABASE_URL
 
 
@@ -115,15 +117,35 @@ class PostgresCursorWrapper:
     def fetchall(self):
         return self.cursor.fetchall()
 
+    def fetchmany(self, size=None):
+        return self.cursor.fetchmany(size) if size is not None else self.cursor.fetchmany()
+
+    def close(self):
+        self.cursor.close()
+
+    def __iter__(self):
+        return iter(self.cursor)
+
+    @property
+    def rowcount(self):
+        return self.cursor.rowcount
+
+    @property
+    def description(self):
+        return self.cursor.description
+
 
 class PostgresConnectionWrapper:
     def __init__(self, raw_conn):
         self.conn = raw_conn
 
+    def cursor(self):
+        raw_cur = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        return PostgresCursorWrapper(raw_cur)
+
     def execute(self, query: str, params: Any = None):
-        cursor = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        wrapper = PostgresCursorWrapper(cursor)
-        return wrapper.execute(query, params)
+        cursor = self.cursor()
+        return cursor.execute(query, params)
 
     def executescript(self, script: str):
         cursor = self.conn.cursor()
@@ -132,6 +154,9 @@ class PostgresConnectionWrapper:
 
     def commit(self):
         self.conn.commit()
+
+    def rollback(self):
+        self.conn.rollback()
 
     def close(self):
         self.conn.close()

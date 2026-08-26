@@ -134,27 +134,45 @@ header {
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font-size: 15px;
   font-weight: 800;
   color: var(--ink-primary);
   user-select: none;
 }
 
-.brand-mark {
-  width: 30px;
-  height: 30px;
-  background: var(--brand-red);
-  color: #ffffff;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-sm);
-  font-size: 14px;
-  font-weight: 800;
+.brand-lockup-inline {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0px;
+  line-height: 1;
 }
 
-.brand b {
-  color: var(--brand-red);
+.brand-lockup-inline .brand-bold {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.8px;
+  color: #0F172A;
+}
+
+.brand-lockup-inline .brand-light {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  color: #64748B;
+}
+
+.brand-lockup-inline .brand-sq {
+  width: 5.5px;
+  height: 5.5px;
+  background-color: #DC2626;
+  border-radius: 1px;
+  display: inline-block;
+  margin-left: 2.5px;
+  margin-bottom: 2px;
+  box-shadow: 0 0 6px rgba(220, 38, 38, 0.4);
 }
 
 .brand small {

@@ -581,7 +581,7 @@ function App() {
         {/* Clean, Focused Left Sidebar */}
         <aside className={`sidebar ${mobileTab === 'info' ? 'mobile-active' : ''}`}>
           <button className="back" onClick={() => setScreen('egress')}>
-            <ArrowLeft size={16} /> ← Back to EGRESS Home
+            <ArrowLeft size={16} /> ← Back to EgressCo Home
           </button>
 
           <div className="project-mini">
@@ -945,12 +945,13 @@ function App() {
 
 const Header = ({ onNew, compact, onSwitchToHome }) => (
   <header className="egress-review-header">
-    <div className="brand" onClick={onSwitchToHome} style={{ cursor: 'pointer' }} title="Return to EGRESS Home">
-      <div className="brand-mark" style={{ background: 'var(--egress-crimson)' }}>
-        <ShieldCheck size={18} color="#FFFFFF" />
+    <div className="brand" onClick={onSwitchToHome} style={{ cursor: 'pointer' }} title="Return to EgressCo Home">
+      <div className="brand-lockup-inline">
+        <span className="brand-bold">EGRESS</span>
+        <span className="brand-light">CO</span>
+        <span className="brand-sq"></span>
       </div>
-      <span>EGRESS <b>FLS AUDIT</b></span>
-      <small style={{ background: '#FEF2F2', color: '#B91C1C', border: '1px solid #FCA5A5' }}>UAE FLSC 2018</small>
+      <small style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', marginLeft: '8px' }}>UAE FLSC 2018</small>
     </div>
     {compact ? (
       <div className="user">

@@ -178,11 +178,12 @@ export default function EgressHome({
           {/* Top Nav inside Floating Card */}
           <div className="hero-card-nav">
             <div className="hero-brand-block" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
-              <div className="hero-brand-shield">
-                <ShieldCheck size={20} />
-              </div>
               <div className="hero-brand-text">
-                <span className="hero-brand-name">EGRESS</span>
+                <div className="brand-lockup-main">
+                  <span className="brand-word-bold">EGRESS</span>
+                  <span className="brand-word-light">CO</span>
+                  <span className="brand-stamp-square"></span>
+                </div>
                 <span className="hero-brand-sub">FIRE & LIFE SAFETY ENGINEERING</span>
               </div>
             </div>

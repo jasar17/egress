@@ -56,125 +56,17 @@ class ViolationUpdate(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
 
 
-@contextmanager
-def db() -> Any:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield connection
-        connection.commit()
-    finally:
-        connection.close()
+from app.db import get_db as db, init_db, is_postgres, load_code_clauses, now
 
 
-def now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def rows(items: list[sqlite3.Row]) -> list[dict[str, Any]]:
+def rows(items: list[Any]) -> list[dict[str, Any]]:
     return [dict(item) for item in items]
 
 
-def load_code_clauses(con: sqlite3.Connection) -> int:
-    json_path = DATA_DIR / "uae_fls_code_clauses_business_occupancy.json"
-    if not json_path.exists():
-        json_path = BASE_DIR.parent / "seed" / "uae_fls_code_clauses_business_occupancy.json"
-    if not json_path.exists():
-        return 0
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    clauses = data.get("clauses", [])
-    con.execute("DELETE FROM code_clauses")
-    for clause in clauses:
-        con.execute(
-            """
-            INSERT OR REPLACE INTO code_clauses (
-                clause_id, topic, occupancy, requirement_type, value, unit, condition, note, source_table, source_page
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                clause.get("clause_id"),
-                clause.get("topic"),
-                clause.get("occupancy"),
-                clause.get("requirement_type"),
-                float(clause.get("value")),
-                clause.get("unit"),
-                clause.get("condition"),
-                clause.get("note"),
-                clause.get("source_table"),
-                int(clause.get("source_page")),
-            ),
-        )
-    return len(clauses)
-
-
 def init_database() -> None:
+    init_db()
     with db() as con:
-        existing_table = con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='code_clauses'").fetchone()
-        if existing_table:
-            cols = [col[1] for col in con.execute("PRAGMA table_info(code_clauses)").fetchall()]
-            if "clause_id" not in cols:
-                con.execute("DROP TABLE code_clauses")
-
-        con.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS projects (
-              id TEXT PRIMARY KEY, name TEXT NOT NULL, client_name TEXT NOT NULL, created_at TEXT NOT NULL,
-              occupancy_type TEXT NOT NULL DEFAULT 'Business - Regular office areas',
-              sprinklered INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE TABLE IF NOT EXISTS drawings (
-              id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id), file_url TEXT,
-              file_type TEXT NOT NULL, occupancy_type TEXT NOT NULL DEFAULT 'Business - Regular office areas', scale REAL NOT NULL,
-              status TEXT NOT NULL, created_at TEXT NOT NULL,
-              sprinklered INTEGER NOT NULL DEFAULT 1,
-              page_index INTEGER NOT NULL DEFAULT 0,
-              floor_name TEXT DEFAULT 'Architectural Floor Plan'
-            );
-            CREATE TABLE IF NOT EXISTS extracted_elements (
-              id TEXT PRIMARY KEY, drawing_id TEXT NOT NULL REFERENCES drawings(id), type TEXT NOT NULL,
-              name TEXT, geometry TEXT NOT NULL, properties TEXT NOT NULL DEFAULT '{}'
-            );
-            CREATE TABLE IF NOT EXISTS violations (
-              id TEXT PRIMARY KEY, drawing_id TEXT NOT NULL REFERENCES drawings(id), type TEXT NOT NULL,
-              related_element_id TEXT, clause_ref TEXT NOT NULL, measured_value REAL NOT NULL,
-              measured_unit TEXT NOT NULL, limit_value REAL NOT NULL, limit_unit TEXT NOT NULL,
-              severity TEXT NOT NULL, status TEXT NOT NULL, note TEXT, geometry TEXT, title TEXT NOT NULL,
-              detail TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS code_clauses (
-              clause_id TEXT PRIMARY KEY,
-              topic TEXT NOT NULL,
-              occupancy TEXT NOT NULL,
-              requirement_type TEXT NOT NULL,
-              value REAL NOT NULL,
-              unit TEXT NOT NULL,
-              condition TEXT,
-              note TEXT,
-              source_table TEXT NOT NULL,
-              source_page INTEGER NOT NULL
-            );
-            """
-        )
-
-        drawing_cols = [col[1] for col in con.execute("PRAGMA table_info(drawings)").fetchall()]
-        if "sprinklered" not in drawing_cols:
-            con.execute("ALTER TABLE drawings ADD COLUMN sprinklered INTEGER NOT NULL DEFAULT 1")
-        if "page_index" not in drawing_cols:
-            con.execute("ALTER TABLE drawings ADD COLUMN page_index INTEGER NOT NULL DEFAULT 0")
-        if "floor_name" not in drawing_cols:
-            con.execute("ALTER TABLE drawings ADD COLUMN floor_name TEXT DEFAULT 'Architectural Floor Plan'")
-
-        project_cols = [col[1] for col in con.execute("PRAGMA table_info(projects)").fetchall()]
-        if "sprinklered" not in project_cols:
-            con.execute("ALTER TABLE projects ADD COLUMN sprinklered INTEGER NOT NULL DEFAULT 1")
-        if "occupancy_type" not in project_cols:
-            con.execute("ALTER TABLE projects ADD COLUMN occupancy_type TEXT NOT NULL DEFAULT 'Business - Regular office areas'")
-
-        load_code_clauses(con)
-        existing = con.execute("SELECT id FROM projects WHERE id = 'project-al-noor'").fetchone()
+        existing = con.execute("SELECT id FROM projects WHERE id = ?", ("project-al-noor",)).fetchone()
         if not existing:
             seed_demo(con)
 

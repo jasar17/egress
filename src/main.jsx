@@ -41,7 +41,7 @@ const DEMO_FLAGS = [
   { id: 'V-045', kind: 'Travel distance', clause: 'UAE FLSC 3.16-BUS-TD-S', title: 'Travel distance exceeds maximum', detail: 'Open office - South zone', measured: '46.1 m', limit: '45.0 m', severity: 'High', pos: ['34%', '74%'], status: 'open' }
 ];
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+const API_URL = import.meta.env.VITE_API_URL || (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'http://127.0.0.1:8000' : 'https://egressandco.onrender.com');
 const DEMO_PROJECT_ID = 'project-al-noor';
 const DEMO_DRAWING_ID = 'drawing-al-noor-l06';
 

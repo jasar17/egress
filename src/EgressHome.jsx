@@ -214,19 +214,11 @@ export default function EgressHome({
 
           {/* Centered Hero Typography */}
           <div className="hero-card-center-body">
-            <div className="hero-geo-chip">
-              <span className="geo-dot"></span>
-              <span>[25.2048° N, 55.2708° E — DUBAI, UAE]</span>
-              <span className="geo-sep">•</span>
-              <span>CDGH-OP-25 STATUTORY COMPLIANCE</span>
-            </div>
-
             <h1 className="hero-card-headline">
               Precision Egress to <span className="hero-headline-italic">Build Safer Spaces</span>
             </h1>
             <p className="hero-card-subtext">
-              Deterministic spatial engineering platform analyzing travel distances, exit capacities, and corridor safety.
-              Ensuring 100% <em>UAE Fire & Life Safety Code of Practice</em> conformity before Civil Defence submission.
+              Deterministic spatial engineering to verify travel distances, exit capacities, and UAE Civil Defence compliance in seconds.
             </p>
 
             <div className="hero-center-actions">

@@ -1763,12 +1763,25 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.12);
   }
 
+  .capabilities-layout-grid {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .capabilities-left-col {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
   .capabilities-right-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
   }
 
   .capability-card-item {
-    padding: 28px 14px;
+    padding: 22px 14px;
   }
 
   .promo-ribbon-inner {

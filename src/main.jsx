@@ -577,9 +577,9 @@ function App() {
   return (
     <>
       <Header compact onSwitchToHome={() => setScreen('egress')} onNew={() => { setUploadState('idle'); setUploadError(''); setShowUploadModal(true); }} />
-      <div className="review">
+      <div className={`review mobile-tab-${mobileTab}`}>
         {/* Clean, Focused Left Sidebar */}
-        <aside className="sidebar">
+        <aside className={`sidebar ${mobileTab === 'info' ? 'mobile-active' : ''}`}>
           <button className="back" onClick={() => setScreen('egress')}>
             <ArrowLeft size={16} /> ← Back to EGRESS Home
           </button>
@@ -636,7 +636,7 @@ function App() {
         </aside>
 
         {/* Center Viewer */}
-        <main className="viewer">
+        <main className={`viewer ${mobileTab === 'plan' ? 'mobile-active' : ''}`}>
           {/* SINGLE UNIFIED TOP CONTROL BAR */}
           <div className="unified-top-bar">
             {/* Floor switcher pills */}
@@ -738,8 +738,7 @@ function App() {
               />
             </section>
 
-            {/* Clean, Spacious Findings Column */}
-            <aside className="findings">
+            <aside className={`findings ${mobileTab === 'findings' ? 'mobile-active' : ''}`}>
               <div className="find-head">
                 <div>
                   <h2>Safety Findings <span className="count-badge">{items.filter(x => x.status === 'open').length} open</span></h2>
@@ -809,6 +808,34 @@ function App() {
             </aside>
           </div>
         </main>
+      </div>
+
+      {/* Mobile Bottom Navigation Dock */}
+      <div className="mobile-review-nav">
+        <button
+          className={`mob-nav-item ${mobileTab === 'plan' ? 'active' : ''}`}
+          onClick={() => setMobileTab('plan')}
+        >
+          <Layers size={17} />
+          <span>Floor Plan</span>
+        </button>
+        <button
+          className={`mob-nav-item ${mobileTab === 'findings' ? 'active' : ''}`}
+          onClick={() => setMobileTab('findings')}
+        >
+          <AlertTriangle size={17} />
+          <span>Findings</span>
+          {items.filter(x => x.status === 'open').length > 0 && (
+            <span className="mob-badge">{items.filter(x => x.status === 'open').length}</span>
+          )}
+        </button>
+        <button
+          className={`mob-nav-item ${mobileTab === 'info' ? 'active' : ''}`}
+          onClick={() => setMobileTab('info')}
+        >
+          <Building2 size={17} />
+          <span>Overview</span>
+        </button>
       </div>
 
       {/* Slide-over finding inspection drawer */}
@@ -1089,6 +1116,72 @@ function FloorPlan({
     setIsDragging(false);
   };
 
+  // Mobile Touch Gestures: Single finger drag pan & Two-finger pinch zoom
+  const touchRef = useRef({ mode: 'none', startPan: { x: 0, y: 0 }, startTouch: { x: 0, y: 0 }, startDist: 0, startZoom: 1.0 });
+
+  const handleTouchStart = (e) => {
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touchRef.current = {
+        mode: 'pan',
+        startPan: { ...pan },
+        startTouch: { x: t.clientX, y: t.clientY },
+        startDist: 0,
+        startZoom: zoom
+      };
+      setIsDragging(true);
+    } else if (e.touches.length === 2) {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      touchRef.current = {
+        mode: 'pinch',
+        startPan: { ...pan },
+        startTouch: { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 },
+        startDist: dist,
+        startZoom: zoom
+      };
+      setIsDragging(true);
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    if (touchRef.current.mode === 'pan' && e.touches.length === 1) {
+      const t = e.touches[0];
+      const dx = t.clientX - touchRef.current.startTouch.x;
+      const dy = t.clientY - touchRef.current.startTouch.y;
+      setPan({
+        x: touchRef.current.startPan.x + dx,
+        y: touchRef.current.startPan.y + dy
+      });
+    } else if (touchRef.current.mode === 'pinch' && e.touches.length === 2) {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      if (touchRef.current.startDist > 0) {
+        const factor = dist / touchRef.current.startDist;
+        const newZoom = Math.min(4.0, Math.max(0.5, Math.round(touchRef.current.startZoom * factor * 100) / 100));
+        setZoom(newZoom);
+      }
+    }
+  };
+
+  const handleTouchEnd = (e) => {
+    if (e.touches.length === 0) {
+      touchRef.current = { mode: 'none', startPan: { x: 0, y: 0 }, startTouch: { x: 0, y: 0 }, startDist: 0, startZoom: 1.0 };
+      setIsDragging(false);
+    } else if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touchRef.current = {
+        mode: 'pan',
+        startPan: { ...pan },
+        startTouch: { x: t.clientX, y: t.clientY },
+        startDist: 0,
+        startZoom: zoom
+      };
+    }
+  };
+
   // Keyboard navigation & CAD shortcuts (Spacebar pan, Z to fit, 0, +, -)
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -1240,8 +1333,13 @@ function FloorPlan({
         setIsDragging(false);
         setHoveredRoom(null);
       }}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
       style={{
-        cursor: isDragging ? 'grabbing' : isSpacePressed ? 'grab' : zoom > 1.05 ? 'grab' : 'default'
+        cursor: isDragging ? 'grabbing' : isSpacePressed ? 'grab' : zoom > 1.05 ? 'grab' : 'default',
+        touchAction: 'none'
       }}
     >
       {loading && (

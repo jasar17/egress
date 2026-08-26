@@ -2299,3 +2299,173 @@ nav a.active {
   z-index: 999;
   border-left: 3px solid var(--brand-red);
 }
+
+/* ==========================================================================
+   MOBILE RESPONSIVE SYSTEM (SMART TAB SWITCHING & TOUCH ERGONOMICS)
+   ========================================================================== */
+.mobile-review-nav {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  /* Workspace container fills viewport height above mobile nav */
+  .review {
+    height: calc(100vh - 54px - 56px);
+    display: block;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Hide columns unless active on mobile */
+  .sidebar,
+  .viewer,
+  .findings {
+    display: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    border-right: none;
+    border-left: none;
+  }
+
+  .sidebar.mobile-active,
+  .viewer.mobile-active,
+  .findings.mobile-active {
+    display: flex !important;
+    flex-direction: column;
+  }
+
+  .viewer .content {
+    display: block;
+    height: calc(100% - 48px);
+    overflow: hidden;
+  }
+
+  .plan-wrap {
+    height: 100% !important;
+    width: 100% !important;
+  }
+
+  .findings.mobile-active {
+    height: 100% !important;
+    overflow-y: auto;
+  }
+
+  /* Fixed Bottom Navigation Dock */
+  .mobile-review-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: #0F172A;
+    border-top: 1px solid #334155;
+    display: flex !important;
+    align-items: center;
+    justify-content: space-around;
+    z-index: 150;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3);
+  }
+
+  .mob-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: transparent;
+    border: none;
+    color: #94A3B8;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 8px 0;
+    cursor: pointer;
+    position: relative;
+    transition: color 0.15s ease;
+  }
+
+  .mob-nav-item.active {
+    color: #FFFFFF;
+  }
+
+  .mob-nav-item.active svg {
+    color: #EF4444;
+  }
+
+  .mob-badge {
+    position: absolute;
+    top: 5px;
+    right: calc(50% - 22px);
+    background: #DC2626;
+    color: #FFFFFF;
+    font-size: 9px;
+    font-weight: 800;
+    padding: 1px 5px;
+    border-radius: 999px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* Unified Top Control Bar on Mobile */
+  .unified-top-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+    padding: 6px 10px;
+    gap: 8px;
+    min-height: 48px;
+  }
+
+  .top-actions {
+    gap: 6px;
+  }
+
+  /* Mobile Bottom Sheet for Detail Panel */
+  .detail-panel {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 82vh !important;
+    border-radius: 20px 20px 0 0;
+    border-left: none;
+    border-top: 4px solid var(--brand-red);
+    box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.4);
+    animation: slideUpBottom 0.25s ease-out;
+  }
+
+  .layer-controls-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 8px;
+  }
+
+  .layer-toggles {
+    gap: 4px;
+  }
+
+  .layer-chip {
+    padding: 4px 7px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .modal, .modal-panel {
+    width: 95% !important;
+    max-width: 95% !important;
+    padding: 18px 14px;
+  }
+
+  .modal-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+@keyframes slideUpBottom {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+

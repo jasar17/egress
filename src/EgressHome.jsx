@@ -23,9 +23,8 @@ import {
   Eye,
   Maximize2
 } from 'lucide-react';
-import heroBrickImg from './assets/hero_brick_building.jpg';
-import heroImg from './assets/hero_egress.jpg';
-import financeImg from './assets/finance_desk.jpg';
+import heroDubaiArch from './assets/hero_dubai_arch.jpg';
+import egressStairArch from './assets/egress_stair_arch.jpg';
 import abstractDarkImg from './assets/abstract_dark_crimson.jpg';
 
 // SVG Squiggly Wave Accent
@@ -166,9 +165,15 @@ export default function EgressHome({
 
         <div
           className="egress-hero-floating-card"
-          style={{ backgroundImage: `url(${heroBrickImg})` }}
+          style={{ backgroundImage: `url(${heroDubaiArch})` }}
         >
           <div className="hero-card-dark-overlay"></div>
+
+          {/* Architectural CAD Corner Crosshairs */}
+          <div className="cad-corner tl">+</div>
+          <div className="cad-corner tr">+</div>
+          <div className="cad-corner bl">+</div>
+          <div className="cad-corner br">+</div>
 
           {/* Top Nav inside Floating Card */}
           <div className="hero-card-nav">
@@ -176,7 +181,10 @@ export default function EgressHome({
               <div className="hero-brand-shield">
                 <ShieldCheck size={20} />
               </div>
-              <span className="hero-brand-name">EGRESS</span>
+              <div className="hero-brand-text">
+                <span className="hero-brand-name">EGRESS</span>
+                <span className="hero-brand-sub">FIRE & LIFE SAFETY ENGINEERING</span>
+              </div>
             </div>
 
             <nav className="hero-nav-menu">
@@ -184,79 +192,85 @@ export default function EgressHome({
                 Home
               </button>
               <button className="hero-nav-item" onClick={() => document.getElementById('capabilities-section')?.scrollIntoView({ behavior: 'smooth' })}>
-                Capabilities
+                01 Capabilities
               </button>
               <button className="hero-nav-item" onClick={() => document.getElementById('upload-section')?.scrollIntoView({ behavior: 'smooth' })}>
-                Upload Floor Plan
+                02 Upload Plan
               </button>
               <button className="hero-nav-item" onClick={() => document.getElementById('about-section')?.scrollIntoView({ behavior: 'smooth' })}>
-                About EGRESS
+                03 Methodology
               </button>
               <button className="hero-nav-item" onClick={() => document.getElementById('featured-audit')?.scrollIntoView({ behavior: 'smooth' })}>
-                Case Audit
+                04 Case Audit
               </button>
             </nav>
 
             <div className="hero-nav-actions">
               <button className="btn-hero-nav-cta" onClick={handleQuickDemoClick}>
-                Level 06 Demo
+                Dubai Tower Demo
               </button>
             </div>
           </div>
 
           {/* Centered Hero Typography */}
           <div className="hero-card-center-body">
+            <div className="hero-geo-chip">
+              <span className="geo-dot"></span>
+              <span>[25.2048° N, 55.2708° E — DUBAI, UAE]</span>
+              <span className="geo-sep">•</span>
+              <span>CDGH-OP-25 STATUTORY COMPLIANCE</span>
+            </div>
+
             <h1 className="hero-card-headline">
               Precision Egress to <span className="hero-headline-italic">Build Safer Spaces</span>
             </h1>
             <p className="hero-card-subtext">
-              We deliver <span className="text-medium">deterministic AI compliance reviews</span> that analyze travel distances, exit capacities,
-              and corridor safety. Ensure full <em>UAE Fire & Life Safety Code</em> conformity before civil defense submission.
+              Deterministic spatial engineering platform analyzing travel distances, exit capacities, and corridor safety.
+              Ensuring 100% <em>UAE Fire & Life Safety Code of Practice</em> conformity before Civil Defence submission.
             </p>
 
             <div className="hero-center-actions">
-              <button className="btn-hero-tour" onClick={handleQuickDemoClick}>
-                <Sparkles size={16} /> Take a Tour (Level 06 Demo)
-              </button>
               <button
-                className="btn-hero-tour"
-                style={{ backgroundColor: 'rgba(15, 23, 42, 0.75)', border: '1px solid rgba(255,255,255,0.4)' }}
+                className="btn-hero-tour primary-cta"
                 onClick={() => document.getElementById('upload-section')?.scrollIntoView({ behavior: 'smooth' })}
               >
-                <FileUp size={16} /> Upload Floor Plan ↓
+                <FileUp size={16} /> Upload Floor Plan (.DXF / .PDF)
+              </button>
+              <button className="btn-hero-tour secondary-cta" onClick={handleQuickDemoClick}>
+                <Building2 size={16} /> Open Level 06 Case Audit →
               </button>
             </div>
           </div>
 
-          {/* Bottom Docked 3-Column Glass Bar (Identical layout to reference) */}
+          {/* Bottom Docked 3-Column Glass Bar (Architectural Specs) */}
           <div className="hero-card-bottom-bar">
             <div className="hero-bottom-col">
               <div className="hero-bottom-col-title">
                 <ShieldCheck size={16} />
-                <span>(*) Compliance Precision</span>
+                <span>168 Statutory Clauses</span>
               </div>
               <p className="hero-bottom-col-desc">
-                100% deterministic spatial checks against 168+ UAE Fire & Life Safety Code clauses.
+                100% deterministic spatial checks against official UAE Fire & Life Safety Code requirements.
               </p>
             </div>
 
             <div className="hero-bottom-col">
               <div className="hero-bottom-col-title">
                 <UsersIcon />
-                <span>👥 Architectural Safety</span>
+                <span>Architectural Geometry</span>
               </div>
               <p className="hero-bottom-col-desc">
-                Evaluates travel distances, exit unit widths, and dead-end corridor pockets in seconds.
+                Automated shortest-path walkability, exit unit widths, and dead-end corridor pockets.
               </p>
             </div>
 
             <div className="hero-bottom-col">
               <div className="hero-bottom-col-title">
                 <CheckCircle2 size={16} />
-                <span>📋 Civil Defense Sign-off</span>
+                <span>Civil Defence Sign-off</span>
               </div>
               <p className="hero-bottom-col-desc">
-                Automated clause citations and traceable CSV audit reports ready for authority submission.
+                Traceable clause citations and structured audit packages ready for authority submission.
               </p>
             </div>
           </div>
@@ -411,28 +425,28 @@ export default function EgressHome({
         </div>
       </section>
 
-      {/* 5. ABOUT EGRESS SECTION */}
+      {/* 3. METHODOLOGY SECTION */}
       <section id="about-section" className="egress-about-section">
         <div className="egress-container about-layout-grid">
           <div className="about-left-col">
-            <span className="about-eyebrow-chip">ABOUT EGRESS</span>
+            <span className="about-eyebrow-chip">03 // ENGINEERING METHODOLOGY</span>
             <h2 className="about-heading-heavy">
-              Automated civil defense compliance for <em>modern architectural engineering</em>
+              Deterministic compliance verification for <em>modern architectural engineering</em>
             </h2>
             <SquigglyWave color="#991B1B" width={56} height={10} className="mt-wave" />
           </div>
           <div className="about-right-col">
             <p className="about-body-paragraph">
-              In modern building construction across the UAE and Gulf region, egress safety verification is one of the most critical stages in securing civil defense permitting. Traditionally, reviewing floor plans requires manual ruler measurements across dozens of architectural sheets to track travel paths and exit widths.
+              In modern high-rise building construction across the UAE and Gulf region, egress safety verification is a statutory requirement for securing Civil Defence approval. Traditionally, reviewing drawings requires manual drafting measurements across dozens of architectural sheets to track travel paths and exit capacities.
             </p>
             <p className="about-body-paragraph">
-              <strong>EGRESS</strong> transforms this workflow into an instant, deterministic computational process. By extracting spatial geometry from DXF and PDF drawings, our platform calculates egress compliance against <em>168+ UAE code clauses</em> in seconds, preventing costly redesign delays before site execution.
+              <strong>EGRESS</strong> transforms this into a deterministic spatial computing process. By extracting exact geometry from DXF and PDF vector drawings, our platform calculates egress compliance against <em>168+ UAE code clauses</em> in seconds, eliminating human error before authority submission.
             </p>
           </div>
         </div>
       </section>
 
-      {/* 6. FEATURED AUDIT CASE STUDY (Dark Crimson 3D Abstract Background) */}
+      {/* 4. FEATURED AUDIT CASE STUDY (Architectural Egress Stairwell Backdrop) */}
       <section
         id="featured-audit"
         className="egress-featured-audit-section"
@@ -441,6 +455,9 @@ export default function EgressHome({
         <div className="featured-dark-overlay"></div>
         <div className="egress-container featured-content-wrap">
           <div className="featured-head-center">
+            <span className="about-eyebrow-chip" style={{ background: 'rgba(255,255,255,0.12)', color: '#FFFFFF' }}>
+              04 // CASE STUDY AUDIT
+            </span>
             <h2 className="featured-title-white">Featured Compliance Audit</h2>
             <p className="featured-sub-white">
               <em>Al Noor Business Centre</em> — Level 06 Commercial Office Floor Plan Compliance Analysis
@@ -449,14 +466,14 @@ export default function EgressHome({
           </div>
 
           <div className="featured-case-card">
-            <div className="case-card-image-half" style={{ backgroundImage: `url(${financeImg})` }}>
-              <div className="case-image-badge">DUBAI COMMERCIAL AUDIT</div>
+            <div className="case-card-image-half" style={{ backgroundImage: `url(${egressStairArch})` }}>
+              <div className="case-image-badge">DUBAI COMMERCIAL AUDIT • 1:100 SCALE</div>
             </div>
             <div className="case-card-info-half">
-              <h3 className="case-info-title">Corporate Building Review</h3>
+              <h3 className="case-info-title">High-Rise Egress Verification</h3>
               <p className="case-info-text">
-                Complete architectural egress review flagged 4 critical findings: North & South zone travel distances
-                exceeding 45.0m, and West exit door undersized for calculated occupant load.
+                Full architectural egress evaluation flagged 4 critical findings: North & South zone travel distances
+                exceeding 45.0m non-sprinklered threshold, and West exit door undersized for calculated occupant load.
               </p>
               <button
                 className="btn-egress-primary"

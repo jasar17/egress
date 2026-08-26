@@ -192,16 +192,16 @@ export default function EgressHome({
                 Home
               </button>
               <button className="hero-nav-item" onClick={() => document.getElementById('capabilities-section')?.scrollIntoView({ behavior: 'smooth' })}>
-                01 Capabilities
+                Capabilities
               </button>
               <button className="hero-nav-item" onClick={() => document.getElementById('upload-section')?.scrollIntoView({ behavior: 'smooth' })}>
-                02 Upload Plan
+                Upload Plan
               </button>
               <button className="hero-nav-item" onClick={() => document.getElementById('about-section')?.scrollIntoView({ behavior: 'smooth' })}>
-                03 Methodology
+                Methodology
               </button>
               <button className="hero-nav-item" onClick={() => document.getElementById('featured-audit')?.scrollIntoView({ behavior: 'smooth' })}>
-                04 Case Audit
+                Case Audit
               </button>
             </nav>
 
@@ -421,7 +421,7 @@ export default function EgressHome({
       <section id="about-section" className="egress-about-section">
         <div className="egress-container about-layout-grid">
           <div className="about-left-col">
-            <span className="about-eyebrow-chip">03 // ENGINEERING METHODOLOGY</span>
+            <span className="about-eyebrow-chip">ENGINEERING METHODOLOGY</span>
             <h2 className="about-heading-heavy">
               Deterministic compliance verification for <em>modern architectural engineering</em>
             </h2>
@@ -448,7 +448,7 @@ export default function EgressHome({
         <div className="egress-container featured-content-wrap">
           <div className="featured-head-center">
             <span className="about-eyebrow-chip" style={{ background: 'rgba(255,255,255,0.12)', color: '#FFFFFF' }}>
-              04 // CASE STUDY AUDIT
+              CASE STUDY AUDIT
             </span>
             <h2 className="featured-title-white">Featured Compliance Audit</h2>
             <p className="featured-sub-white">

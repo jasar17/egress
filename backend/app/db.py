@@ -19,10 +19,11 @@ except ImportError:
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
 SQLITE_DB_PATH = Path(os.getenv("FLS_DATABASE_PATH", DATA_DIR / "fls_demo.db"))
+DEFAULT_SUPABASE_URL = "postgresql://postgres.xtppmnmpunfflnxrfinb:a%26WHy9%25K48Yas3M@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres"
 
 
 def get_raw_db_url() -> Optional[str]:
-    return os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or os.getenv("SUPABASE_DATABASE_URL")
+    return os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or DEFAULT_SUPABASE_URL
 
 
 def is_postgres() -> bool:

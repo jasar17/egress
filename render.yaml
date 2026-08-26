@@ -10,6 +10,6 @@ services:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: DATABASE_URL
-        sync: false
+        value: postgresql://postgres.xtppmnmpunfflnxrfinb:a%26WHy9%25K48Yas3M@aws-0-ap-northeast-2.pooler.supabase.com:6543/postgres
       - key: FLS_DATABASE_PATH
         value: data/fls_demo.db

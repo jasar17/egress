@@ -56,7 +56,7 @@ class ViolationUpdate(BaseModel):
     note: str | None = Field(default=None, max_length=1000)
 
 
-from app.db import get_db as db, init_db, is_postgres, load_code_clauses, now
+from app.db import get_db as db, get_drawing_file, init_db, is_postgres, load_code_clauses, now, save_drawing_file
 
 
 def rows(items: list[Any]) -> list[dict[str, Any]]:
@@ -129,6 +129,49 @@ from app.pdf_parser import PDFParseError, get_pdf_pages_metadata, parse_pdf_file
 from app.rules_engine import evaluate_fls_rules
 
 
+def ensure_drawing_file(drawing_id: str, con: Any) -> tuple[Path | None, bytes | None]:
+    """
+    Checks if drawing file exists locally on disk in UPLOAD_DIR.
+    If missing (e.g. after a Render container redeploy or restart),
+    restores the binary from persistent Supabase PostgreSQL storage.
+    Returns (local_path, file_bytes).
+    """
+    drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
+    if not drawing:
+        return None, None
+
+    file_type = drawing["file_type"]
+    target = UPLOAD_DIR / f"{drawing_id}.{file_type}"
+
+    # 1. If already on local disk and non-empty
+    if target.exists() and target.stat().st_size > 0:
+        try:
+            with open(target, "rb") as f:
+                return target, f.read()
+        except Exception:
+            return target, None
+
+    # 2. Check persistent drawing_files table (Supabase Postgres)
+    stored = get_drawing_file(drawing_id, con)
+    if stored:
+        _, _, file_bytes = stored
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        with open(target, "wb") as f:
+            f.write(file_bytes)
+        return target, file_bytes
+
+    # 3. Fallback: check drawing["file_url"]
+    raw_url = drawing["file_url"]
+    if raw_url and Path(raw_url).exists() and Path(raw_url).stat().st_size > 0:
+        try:
+            with open(raw_url, "rb") as f:
+                return Path(raw_url), f.read()
+        except Exception:
+            return Path(raw_url), None
+
+    return None, None
+
+
 def process_upload(drawing_id: str, page_index: int | None = None) -> None:
     """Process uploaded drawing: real parsing for DXF and PDF files, preserving seeded drawing as demo fixture."""
     with db() as con:
@@ -137,10 +180,12 @@ def process_upload(drawing_id: str, page_index: int | None = None) -> None:
             return
 
         file_type = drawing["file_type"]
-        file_url = drawing["file_url"]
         is_sprinklered = bool(drawing["sprinklered"]) if "sprinklered" in drawing.keys() and drawing["sprinklered"] is not None else True
         occupancy_type = drawing["occupancy_type"] if drawing["occupancy_type"] else "Business - Regular office areas"
         active_page = page_index if page_index is not None else (drawing["page_index"] if "page_index" in drawing.keys() else 0)
+
+        file_path, _ = ensure_drawing_file(drawing_id, con)
+        file_url = str(file_path) if file_path else drawing["file_url"]
 
         if file_url and file_type in ("dxf", "pdf"):
             try:
@@ -310,8 +355,9 @@ async def upload_drawing(
             raise HTTPException(404, "Project not found.")
         drawing_id = str(uuid.uuid4())
         target = UPLOAD_DIR / f"{drawing_id}{suffix}"
+        content = await file.read()
         with target.open("wb") as output:
-            shutil.copyfileobj(file.file, output)
+            output.write(content)
 
         # Initial floor name guess from filename
         raw_floor = Path(file.filename or "").stem.replace("_", " ")
@@ -319,6 +365,8 @@ async def upload_drawing(
             "INSERT INTO drawings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (drawing_id, project_id, str(target), suffix[1:], occupancy_type.strip(), scale, "processing", now(), 1 if sprinklered else 0, 0, raw_floor)
         )
+        # Store file binary in persistent Supabase PostgreSQL storage
+        save_drawing_file(drawing_id, file.filename or f"drawing_{drawing_id[:8]}{suffix}", suffix[1:], content, con)
 
     # Process drawing geometry for page 0
     process_upload(drawing_id, page_index=0)
@@ -364,17 +412,23 @@ def get_drawing_image(drawing_id: str, page: int | None = None) -> Response:
     """Renders the exact architectural PDF page into a crisp PNG image overview."""
     with db() as con:
         drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
-    if not drawing:
-        raise HTTPException(404, "Drawing not found.")
+        if not drawing:
+            raise HTTPException(404, "Drawing not found.")
 
-    file_url = drawing["file_url"]
-    file_type = drawing["file_type"]
+        file_type = drawing["file_type"]
+        if file_type != "pdf":
+            raise HTTPException(404, "No rendered raster image available for this drawing format.")
 
-    if not file_url or not Path(file_url).exists() or file_type != "pdf":
+        file_path, file_bytes = ensure_drawing_file(drawing_id, con)
+
+    if not file_path and not file_bytes:
         raise HTTPException(404, "No rendered raster image available for this drawing format.")
 
     try:
-        doc = pymupdf.open(file_url)
+        if file_bytes:
+            doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+        else:
+            doc = pymupdf.open(str(file_path))
         if len(doc) == 0:
             raise HTTPException(404, "PDF document is empty.")
 
@@ -400,17 +454,53 @@ def get_drawing_image(drawing_id: str, page: int | None = None) -> Response:
         raise HTTPException(500, f"Failed to render drawing image: {str(e)}")
 
 
+@app.get("/drawings/{drawing_id}/file")
+def get_drawing_file_download(drawing_id: str) -> Response:
+    """Downloads the original persistent CAD DXF or PDF drawing file."""
+    with db() as con:
+        drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
+        if not drawing:
+            raise HTTPException(404, "Drawing not found.")
+        file_path, file_bytes = ensure_drawing_file(drawing_id, con)
+
+    if not file_bytes and file_path and file_path.exists():
+        with open(file_path, "rb") as f:
+            file_bytes = f.read()
+
+    if not file_bytes:
+        raise HTTPException(404, "Drawing file binary not found in persistent storage.")
+
+    filename = drawing["floor_name"] or f"drawing_{drawing_id[:8]}"
+    file_type = drawing["file_type"]
+    if not filename.endswith(f".{file_type}"):
+        filename = f"{filename}.{file_type}"
+
+    media_type = "application/pdf" if file_type == "pdf" else "application/dxf" if file_type == "dxf" else "application/octet-stream"
+    return Response(
+        content=file_bytes,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Drawing-Id": drawing_id,
+            "X-File-Size": str(len(file_bytes)),
+            "Access-Control-Expose-Headers": "Content-Disposition, X-Drawing-Id, X-File-Size"
+        }
+    )
+
+
 def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dict[str, Any]:
     """Decodes and analyzes all floor plans in a drawing (single or multi-page), evaluating violations per floor."""
     drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
     if not drawing:
         raise HTTPException(404, "Drawing not found.")
 
-    file_url = drawing["file_url"]
     file_type = drawing["file_type"]
     is_sprinklered = bool(drawing["sprinklered"]) if "sprinklered" in drawing.keys() and drawing["sprinklered"] is not None else True
     occupancy_type = drawing["occupancy_type"] if drawing["occupancy_type"] else "Business - Regular office areas"
     active_page = drawing["page_index"] if "page_index" in drawing.keys() and drawing["page_index"] is not None else 0
+
+    file_path, _ = ensure_drawing_file(drawing_id, con)
+    file_url = str(file_path) if file_path else drawing["file_url"]
 
     if not file_url or not Path(file_url).exists():
         # Demo drawing fallback

@@ -99,6 +99,16 @@ class PostgresCursorWrapper:
                 page_index = EXCLUDED.page_index,
                 floor_name = EXCLUDED.floor_name
             """
+        elif "INSERT OR REPLACE INTO drawing_files" in query:
+            query = """
+            INSERT INTO drawing_files (drawing_id, filename, file_type, file_bytes, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (drawing_id) DO UPDATE SET
+                filename = EXCLUDED.filename,
+                file_type = EXCLUDED.file_type,
+                file_bytes = EXCLUDED.file_bytes,
+                created_at = EXCLUDED.created_at
+            """
 
         if params is not None:
             self.cursor.execute(query, params)
@@ -275,6 +285,13 @@ def init_db() -> None:
                   source_table TEXT NOT NULL,
                   source_page INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS drawing_files (
+                  drawing_id TEXT PRIMARY KEY,
+                  filename TEXT NOT NULL,
+                  file_type TEXT NOT NULL,
+                  file_bytes BYTEA NOT NULL,
+                  created_at TEXT NOT NULL
+                );
                 """
             )
         else:
@@ -316,7 +333,53 @@ def init_db() -> None:
                   source_table TEXT NOT NULL,
                   source_page INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS drawing_files (
+                  drawing_id TEXT PRIMARY KEY,
+                  filename TEXT NOT NULL,
+                  file_type TEXT NOT NULL,
+                  file_bytes BLOB NOT NULL,
+                  created_at TEXT NOT NULL
+                );
                 """
             )
 
         load_code_clauses(con)
+
+
+def save_drawing_file(drawing_id: str, filename: str, file_type: str, file_bytes: bytes, con: Any) -> None:
+    if is_postgres():
+        query = """
+        INSERT INTO drawing_files (drawing_id, filename, file_type, file_bytes, created_at)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (drawing_id) DO UPDATE SET
+            filename = EXCLUDED.filename,
+            file_type = EXCLUDED.file_type,
+            file_bytes = EXCLUDED.file_bytes,
+            created_at = EXCLUDED.created_at
+        """
+        import psycopg2
+        con.execute(query, (drawing_id, filename, file_type, psycopg2.Binary(file_bytes), now()))
+    else:
+        query = """
+        INSERT OR REPLACE INTO drawing_files (drawing_id, filename, file_type, file_bytes, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        import sqlite3
+        con.execute(query, (drawing_id, filename, file_type, sqlite3.Binary(file_bytes), now()))
+
+
+def get_drawing_file(drawing_id: str, con: Any) -> tuple[str, str, bytes] | None:
+    """Returns (filename, file_type, file_bytes) from persistent storage, or None."""
+    row = con.execute("SELECT filename, file_type, file_bytes FROM drawing_files WHERE drawing_id = ?", (drawing_id,)).fetchone()
+    if not row:
+        return None
+    raw_data = row["file_bytes"]
+    if isinstance(raw_data, memoryview):
+        b = raw_data.tobytes()
+    elif hasattr(raw_data, "tobytes"):
+        b = raw_data.tobytes()
+    elif not isinstance(raw_data, bytes):
+        b = bytes(raw_data)
+    else:
+        b = raw_data
+    return (row["filename"], row["file_type"], b)

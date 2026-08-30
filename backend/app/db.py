@@ -41,6 +41,8 @@ def get_postgres_url() -> str:
     return url
 
 
+import re
+
 class PostgresCursorWrapper:
     """
     Wraps a psycopg2 cursor to provide an interface compatible with sqlite3,
@@ -50,9 +52,12 @@ class PostgresCursorWrapper:
         self.cursor = raw_cursor
 
     def execute(self, query: str, params: Any = None):
-        # Convert SQLite '?' placeholders to Postgres '%s'
+        # Convert SQLite '?' placeholders to Postgres '%s' or named :param to %(param)s
         if params is not None:
-            query = query.replace("?", "%s")
+            if isinstance(params, dict):
+                query = re.sub(r':([a-zA-Z_][a-zA-Z0-9_]*)', r'%(\1)s', query)
+            else:
+                query = query.replace("?", "%s")
         # Handle SQLite 'INSERT OR REPLACE' in Postgres
         if "INSERT OR REPLACE INTO code_clauses" in query:
             query = """

@@ -285,7 +285,10 @@ def create_project(payload: ProjectCreate) -> dict[str, Any]:
         "created_at": now(),
     }
     with db() as con:
-        con.execute("INSERT INTO projects VALUES (:id, :name, :client_name, :created_at, :occupancy_type, :sprinklered)", project)
+        con.execute(
+            "INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?)",
+            (project["id"], project["name"], project["client_name"], project["created_at"], project["occupancy_type"], project["sprinklered"])
+        )
     return project
 
 

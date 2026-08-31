@@ -15,6 +15,13 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 - **Interactive Swagger Documentation**: `http://127.0.0.1:8000/docs`
 - **Database**: SQLite database stored automatically at `backend/data/fls_demo.db`.
 
+## 🌐 Live Production Deployment
+
+- **Live Cloud API**: [https://egressandco.onrender.com](https://egressandco.onrender.com)
+- **Live Swagger Documentation**: [https://egressandco.onrender.com/docs](https://egressandco.onrender.com/docs)
+- **Production Frontend (Vercel)**: [https://egress-jade.vercel.app/](https://egress-jade.vercel.app/)
+- **Persistent Storage**: Supabase PostgreSQL integration via SSL pooler (backing `drawing_files` binary storage and table persistence across Render container spin-downs).
+
 ## Core API Endpoints
 
 1. `GET /projects` — Returns active project workspaces and drawings.

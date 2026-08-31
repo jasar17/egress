@@ -64,6 +64,31 @@ uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000 --reload
 
 ---
 
+## 🌐 Live Cloud Deployment & Online Production Version
+
+EGRESS is deployed in production with continuous integration and continuous deployment (CI/CD) across multi-cloud infrastructure:
+
+| Component | Cloud Platform | Live Production URL | Description & Resilience |
+| :--- | :--- | :--- | :--- |
+| **Frontend Web App** | **Vercel** | [**https://egress-jade.vercel.app/**](https://egress-jade.vercel.app/) | Global edge-cached React 18 SPA with automatic preview builds and instant zero-latency floor navigation. |
+| **API & Analysis Engine** | **Render** | [**https://egressandco.onrender.com**](https://egressandco.onrender.com) | Python FastAPI container running PyMuPDF, Ezdxf, Shapely, and NetworkX topological analysis. |
+| **Interactive API Docs** | **Render Swagger** | [**https://egressandco.onrender.com/docs**](https://egressandco.onrender.com/docs) | Live OpenAPI / Swagger UI testbed for executing statutory compliance checks directly. |
+| **Persistent Storage** | **Supabase PostgreSQL** | Integrated via SSL Pooler | Persistent database storing drawings, floor files (`drawing_files` binary storage), and UAE FLS code clauses across container restarts. |
+
+### Production Architecture & Cloud Capabilities
+
+1. **Continuous Deployment via GitHub**:
+   - Pushing to the `master` branch triggers automatic production deployments on both **Vercel** (frontend build) and **Render** (backend container redeployment).
+2. **Zero-Downtime Persistent File Storage**:
+   - Render's ephemeral container storage is backed by **Supabase PostgreSQL**. Uploaded `.pdf` and `.dxf` drawing binaries are mirrored into the `drawing_files` table, ensuring drawings, high-resolution floor image renders, and audit records survive cloud container spin-downs and redeploys.
+3. **High-Performance Multi-Floor In-Memory Caching**:
+   - **Client-Side Cache (`floorCacheRef`)**: Pre-populates all building floor levels into client memory upon upload. Switching between floors (e.g. Ground, Level 01, Level 02, etc.) executes in `< 10ms` with zero UI freeze.
+   - **Backend Cache (`_MULTI_FLOOR_CACHE` & `_IMAGE_CACHE`)**: Caches parsed GeoJSON features, UAE violation assessments, and PyMuPDF rendered raster backdrops in RAM to eliminate redundant re-analysis.
+4. **Resilient Offline / Demo Fallback**:
+   - If the cloud API is warming up or temporarily disconnected, the frontend seamlessly engages an offline fallback to ensure the interactive CAD viewer, demo project review, and CSV export functionality remain completely functional.
+
+---
+
 ### 2. Frontend Application (React 18 + Vite)
 
 Requires Node.js 18+.

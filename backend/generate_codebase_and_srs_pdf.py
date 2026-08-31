@@ -1165,7 +1165,7 @@ def build_pdf(output_path):
             Paragraph("UAE-FLS-3.16-BUS-TD-S", styles['TableCellBold']),
             Paragraph("Table 3.16", styles['TableCell']),
             Paragraph("Page 293", styles['TableCell']),
-            Paragraph("Travel Distance (Sprinklered Business): Maximum allowable travel distance = <b>91.0 meters</b> (45m baseline for high-density suites).", styles['TableCell'])
+            Paragraph("Travel Distance (Sprinklered Business): Maximum allowable travel distance = <b>91.0 meters</b>.", styles['TableCell'])
         ],
         [
             Paragraph("UAE-FLS-3.16-BUS-TD-NS", styles['TableCellBold']),

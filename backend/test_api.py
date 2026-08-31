@@ -221,12 +221,11 @@ def test_full_flow():
     assert p1_max_travel < 50.0, f"Regression error: Unscaled travel distance detected ({p1_max_travel}m >= 50m, previous bug was 122.90m)"
 
     # 19c. Assert Per-Room Independence & Exact Matching between PDF and DXF
-    import sqlite3
-    db_con = sqlite3.connect("data/fls_demo.db")
-    db_con.row_factory = sqlite3.Row
-    dxf_test_path = Path(__file__).resolve().parents[1] / "floor plan" / "Dubai_Commercial_Floor_Level_01_Typical.dxf"
-    dxf_parsed = parse_dxf_file(dxf_test_path)
-    dxf_parsed = calculate_occupant_loads(dxf_parsed, con=db_con)
+    from app.db import get_db
+    with get_db() as db_con:
+        dxf_test_path = Path(__file__).resolve().parents[1] / "floor plan" / "Dubai_Commercial_Floor_Level_01_Typical.dxf"
+        dxf_parsed = parse_dxf_file(dxf_test_path)
+        dxf_parsed = calculate_occupant_loads(dxf_parsed, con=db_con)
     pdf_room_loads = {r["properties"]["name"]: r["properties"]["occupant_load"] for r in p1_rooms}
     dxf_room_loads = {r["name"]: r["occupant_load"] for r in dxf_parsed["rooms"]}
 

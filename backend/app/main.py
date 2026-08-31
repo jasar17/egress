@@ -122,6 +122,22 @@ def serialize_violation(row: sqlite3.Row) -> dict[str, Any]:
     return {**dict(row), "geometry": json.loads(row["geometry"]) if row["geometry"] else None}
 
 
+# Global in-memory caches for fast multi-floor navigation and image delivery
+_MULTI_FLOOR_CACHE: dict[str, dict[str, Any]] = {}
+_IMAGE_CACHE: dict[str, tuple[bytes, float]] = {}
+
+
+def invalidate_drawing_cache(drawing_id: str) -> None:
+    """Invalidates cached floor analyses and rendered images when a drawing is modified or reconfigured."""
+    prefix = f"{drawing_id}_"
+    for k in list(_MULTI_FLOOR_CACHE.keys()):
+        if k == drawing_id or k.startswith(prefix):
+            _MULTI_FLOOR_CACHE.pop(k, None)
+    for k in list(_IMAGE_CACHE.keys()):
+        if k == drawing_id or k.startswith(prefix):
+            _IMAGE_CACHE.pop(k, None)
+
+
 from app.dxf_parser import DXFParseError, parse_dxf_file
 from app.occupant_load import calculate_occupant_loads
 from app.path_analysis import calculate_walkable_distances
@@ -368,6 +384,9 @@ async def upload_drawing(
         # Store file binary in persistent Supabase PostgreSQL storage
         save_drawing_file(drawing_id, file.filename or f"drawing_{drawing_id[:8]}{suffix}", suffix[1:], content, con)
 
+    # Invalidate any stale cache for this drawing id
+    invalidate_drawing_cache(drawing_id)
+
     # Process drawing geometry for page 0
     process_upload(drawing_id, page_index=0)
     
@@ -409,7 +428,22 @@ async def upload_drawing(
 
 @app.get("/drawings/{drawing_id}/image")
 def get_drawing_image(drawing_id: str, page: int | None = None) -> Response:
-    """Renders the exact architectural PDF page into a crisp PNG image overview."""
+    """Renders the exact architectural PDF page into a crisp PNG image overview, cached in memory."""
+    target_page_idx = page if page is not None else 0
+    cache_key = f"{drawing_id}_{target_page_idx}"
+    if cache_key in _IMAGE_CACHE:
+        img_bytes, aspect_ratio = _IMAGE_CACHE[cache_key]
+        return Response(
+            content=img_bytes,
+            media_type="image/png",
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "X-Floor-Page": str(target_page_idx),
+                "X-Aspect-Ratio": str(aspect_ratio),
+                "Access-Control-Expose-Headers": "X-Aspect-Ratio, X-Floor-Page, X-Total-Pages"
+            }
+        )
+
     with db() as con:
         drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
         if not drawing:
@@ -439,6 +473,10 @@ def get_drawing_image(drawing_id: str, page: int | None = None) -> Response:
         pix = pdf_page.get_pixmap(dpi=220)
         img_bytes = pix.tobytes("png")
         aspect_ratio = round(pdf_page.rect.width / pdf_page.rect.height, 4) if pdf_page.rect.height > 0 else 1.4142
+
+        # Cache rendered image bytes in memory
+        _IMAGE_CACHE[f"{drawing_id}_{target_page}"] = (img_bytes, aspect_ratio)
+
         return Response(
             content=img_bytes,
             media_type="image/png",
@@ -489,7 +527,7 @@ def get_drawing_file_download(drawing_id: str) -> Response:
 
 
 def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dict[str, Any]:
-    """Decodes and analyzes all floor plans in a drawing (single or multi-page), evaluating violations per floor."""
+    """Decodes and analyzes all floor plans in a drawing (single or multi-page), evaluating violations per floor with in-memory caching."""
     drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
     if not drawing:
         raise HTTPException(404, "Drawing not found.")
@@ -499,15 +537,23 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
     occupancy_type = drawing["occupancy_type"] if drawing["occupancy_type"] else "Business - Regular office areas"
     active_page = drawing["page_index"] if "page_index" in drawing.keys() and drawing["page_index"] is not None else 0
 
+    cache_key = f"{drawing_id}_{int(is_sprinklered)}_{occupancy_type}"
+    if cache_key in _MULTI_FLOOR_CACHE:
+        cached = _MULTI_FLOOR_CACHE[cache_key]
+        cached["active_page_index"] = active_page
+        return cached
+
     file_path, _ = ensure_drawing_file(drawing_id, con)
     file_url = str(file_path) if file_path else drawing["file_url"]
 
     if not file_url or not Path(file_url).exists():
         # Demo drawing fallback
         demo_violations = con.execute("SELECT * FROM violations WHERE drawing_id = ?", (drawing_id,)).fetchall()
-        demo_elements = con.execute("SELECT * FROM extracted_elements WHERE drawing_id = ? AND type = 'room'", (drawing_id,)).fetchall()
+        demo_elements = con.execute("SELECT * FROM extracted_elements WHERE drawing_id = ?", (drawing_id,)).fetchall()
         v_list = [serialize_violation(v) for v in demo_violations]
-        return {
+        demo_features = [serialize_element(e) for e in demo_elements]
+        room_elements = [e for e in demo_elements if e["type"] == "room"]
+        result = {
             "drawing_id": drawing_id,
             "total_pages": 1,
             "active_page_index": 0,
@@ -515,7 +561,7 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
             "floors": [{
                 "index": 0,
                 "title": drawing["floor_name"] or "Level 06 - Architectural CAD Overview",
-                "rooms_count": len(demo_elements),
+                "rooms_count": len(room_elements),
                 "walls_count": 1,
                 "doors_count": 2,
                 "exits_count": 2,
@@ -525,6 +571,7 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
                 "violations_count": len(demo_violations),
                 "status": "NON-COMPLIANT" if demo_violations else "COMPLIANT",
                 "violations": v_list,
+                "elements": demo_features,
                 "rooms_summary": [
                     {
                         "name": r["name"],
@@ -533,10 +580,12 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
                         "travel_distance_m": 0.0,
                         "nearest_exit": "Exit west",
                     }
-                    for r in demo_elements
+                    for r in room_elements
                 ]
             }]
         }
+        _MULTI_FLOOR_CACHE[cache_key] = result
+        return result
 
     floors: list[dict[str, Any]] = []
     total_violations = 0
@@ -555,7 +604,7 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
                 parsed = calculate_occupant_loads(parsed, con=con, default_occupancy=occupancy_type)
                 floor_title = parsed.get("floor_name") or f"Floor Level {p_idx:02d}"
 
-                element_id_map = {r["name"]: f"elem-{p_idx}-{i}" for i, r in enumerate(parsed.get("rooms", []))}
+                element_id_map = {r["name"]: f"{drawing_id}-elem-{p_idx}-{i}" for i, r in enumerate(parsed.get("rooms", []))}
                 floor_violations = evaluate_fls_rules(
                     parsed,
                     con=con,
@@ -564,6 +613,16 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
                     is_sprinklered=is_sprinklered,
                     occupancy_type=occupancy_type,
                 )
+
+                # Format GeoJSON features for this floor
+                floor_features: list[dict[str, Any]] = []
+                for i, (item_type, name, geom) in enumerate(parsed.get("elements", [])):
+                    floor_features.append({
+                        "id": element_id_map.get(name, f"{drawing_id}-elem-{p_idx}-{i}"),
+                        "type": item_type,
+                        "geometry": geom["geometry"],
+                        "properties": {"name": name, **geom.get("properties", {})}
+                    })
 
                 rooms = parsed.get("rooms", [])
                 habitable_rooms = [r for r in rooms if "STAIR" not in r["name"].upper() and "EXIT" not in r["name"].upper()]
@@ -586,6 +645,7 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
                     "violations_count": v_count,
                     "status": "COMPLIANT" if v_count == 0 else "NON-COMPLIANT",
                     "violations": floor_violations,
+                    "elements": floor_features,
                     "rooms_summary": [
                         {
                             "name": r["name"],
@@ -612,6 +672,7 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
                     "status": "ERROR",
                     "error": str(e),
                     "violations": [],
+                    "elements": [],
                     "rooms_summary": []
                 })
     else:
@@ -620,7 +681,7 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
         parsed = calculate_walkable_distances(parsed)
         parsed = calculate_occupant_loads(parsed, con=con, default_occupancy=occupancy_type)
         floor_title = drawing["floor_name"] or Path(file_url).stem.replace("_", " ")
-        element_id_map = {r["name"]: f"elem-0-{i}" for i, r in enumerate(parsed.get("rooms", []))}
+        element_id_map = {r["name"]: f"{drawing_id}-elem-0-{i}" for i, r in enumerate(parsed.get("rooms", []))}
         floor_violations = evaluate_fls_rules(
             parsed,
             con=con,
@@ -629,6 +690,16 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
             is_sprinklered=is_sprinklered,
             occupancy_type=occupancy_type,
         )
+
+        dxf_features: list[dict[str, Any]] = []
+        for i, (item_type, name, geom) in enumerate(parsed.get("elements", [])):
+            dxf_features.append({
+                "id": element_id_map.get(name, f"{drawing_id}-elem-0-{i}"),
+                "type": item_type,
+                "geometry": geom["geometry"],
+                "properties": {"name": name, **geom.get("properties", {})}
+            })
+
         rooms = parsed.get("rooms", [])
         habitable_rooms = [r for r in rooms if "STAIR" not in r["name"].upper() and "EXIT" not in r["name"].upper()]
         total_load = sum(r.get("occupant_load", 0) for r in habitable_rooms)
@@ -650,6 +721,7 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
             "violations_count": v_count,
             "status": "COMPLIANT" if v_count == 0 else "NON-COMPLIANT",
             "violations": floor_violations,
+            "elements": dxf_features,
             "rooms_summary": [
                 {
                     "name": r["name"],
@@ -662,13 +734,15 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
             ]
         })
 
-    return {
+    summary_result = {
         "drawing_id": drawing_id,
         "total_pages": len(floors),
         "active_page_index": active_page,
         "total_violations_count": total_violations,
         "floors": floors,
     }
+    _MULTI_FLOOR_CACHE[cache_key] = summary_result
+    return summary_result
 
 
 @app.get("/drawings/{drawing_id}/multi-floor-summary")
@@ -701,13 +775,64 @@ def get_drawing_pages(drawing_id: str) -> list[dict[str, Any]]:
 
 @app.post("/drawings/{drawing_id}/page")
 def select_drawing_page(drawing_id: str, payload: PageSelect) -> dict[str, Any]:
-    """Switches the active floor page for a drawing, re-running analysis and element extraction."""
+    """Switches the active floor page for a drawing, updating active page instantly."""
     with db() as con:
         drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
         if not drawing:
             raise HTTPException(404, "Drawing not found.")
 
-    process_upload(drawing_id, page_index=payload.page_index)
+    is_sprinklered = bool(drawing["sprinklered"]) if "sprinklered" in drawing.keys() and drawing["sprinklered"] is not None else True
+    occupancy_type = drawing["occupancy_type"] if drawing["occupancy_type"] else "Business - Regular office areas"
+    cache_key = f"{drawing_id}_{int(is_sprinklered)}_{occupancy_type}"
+
+    # Fast-path: If multi-floor summary is already cached, reuse cached floor data to sync DB
+    cached_summary = _MULTI_FLOOR_CACHE.get(cache_key)
+    target_floor_data = None
+    if cached_summary:
+        target_floor_data = next((f for f in cached_summary.get("floors", []) if f["index"] == payload.page_index), None)
+
+    if target_floor_data and "elements" in target_floor_data:
+        floor_name = target_floor_data["title"]
+        with db() as con:
+            con.execute("DELETE FROM extracted_elements WHERE drawing_id = ?", (drawing_id,))
+            con.execute("DELETE FROM violations WHERE drawing_id = ?", (drawing_id,))
+            for elem in target_floor_data.get("elements", []):
+                con.execute(
+                    "INSERT INTO extracted_elements VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        elem["id"],
+                        drawing_id,
+                        elem["type"],
+                        elem["properties"].get("name", ""),
+                        json.dumps(elem["geometry"]),
+                        json.dumps(elem.get("properties", {})),
+                    ),
+                )
+            for v in target_floor_data.get("violations", []):
+                con.execute(
+                    "INSERT INTO violations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        v["id"],
+                        drawing_id,
+                        v["type"],
+                        v.get("related_element_id"),
+                        v["clause_ref"],
+                        v["measured_value"],
+                        v["measured_unit"],
+                        v["limit_value"],
+                        v["limit_unit"],
+                        v["severity"],
+                        v.get("status", "open"),
+                        v.get("note"),
+                        json.dumps(v["geometry"]) if v.get("geometry") else None,
+                        v["title"],
+                        v["detail"],
+                    ),
+                )
+            con.execute("UPDATE drawings SET status = 'ready', floor_name = ?, page_index = ? WHERE id = ?", (floor_name, payload.page_index, drawing_id))
+    else:
+        # Fallback to full process_upload
+        process_upload(drawing_id, page_index=payload.page_index)
 
     with db() as con:
         updated = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
@@ -733,6 +858,9 @@ def select_drawing_page(drawing_id: str, payload: PageSelect) -> dict[str, Any]:
 
 @app.patch("/drawings/{drawing_id}/config")
 def update_drawing_config(drawing_id: str, payload: DrawingConfigUpdate) -> dict[str, Any]:
+    # Invalidate multi-floor cache since occupancy or sprinkler rules may change
+    invalidate_drawing_cache(drawing_id)
+
     with db() as con:
         drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
         if not drawing:

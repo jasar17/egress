@@ -133,6 +133,9 @@ function App() {
   const [viewMode, setViewMode] = useState('hybrid'); // 'hybrid' | 'vector' | 'image'
   const [isFullScreen, setIsFullScreen] = useState(false);
 
+  // Client-side in-memory floor cache: { [pageIndex]: { elements, items, floorTitle } }
+  const floorCacheRef = useRef({});
+
   // Prevent browser window / tab zoom when scrolling over canvas
   useEffect(() => {
     const preventTabZoom = (e) => {
@@ -209,10 +212,33 @@ function App() {
         }));
         if (dData.multi_floor_summary) {
           setMultiFloorSummary(dData.multi_floor_summary);
+          // Cache all floors
+          if (Array.isArray(dData.multi_floor_summary.floors)) {
+            dData.multi_floor_summary.floors.forEach(f => {
+              floorCacheRef.current[f.index] = {
+                elements: f.elements || [],
+                items: Array.isArray(f.violations) ? f.violations.map(toUiFinding) : [],
+                floorTitle: f.title
+              };
+            });
+          }
         } else {
           fetch(`${API_URL}/drawings/${drawingId}/multi-floor-summary`)
             .then(res => res.ok ? res.json() : null)
-            .then(summary => { if (summary) setMultiFloorSummary(summary); })
+            .then(summary => {
+              if (summary) {
+                setMultiFloorSummary(summary);
+                if (Array.isArray(summary.floors)) {
+                  summary.floors.forEach(f => {
+                    floorCacheRef.current[f.index] = {
+                      elements: f.elements || [],
+                      items: Array.isArray(f.violations) ? f.violations.map(toUiFinding) : [],
+                      floorTitle: f.title
+                    };
+                  });
+                }
+              }
+            })
             .catch(() => {});
         }
       }
@@ -326,11 +352,21 @@ function App() {
 
       const data = await response.json();
       const newDrawingId = data.drawing_id;
+      floorCacheRef.current = {};
       setCurrentDrawingId(newDrawingId);
 
       // Load new drawing data immediately
       if (data.multi_floor_summary) {
         setMultiFloorSummary(data.multi_floor_summary);
+        if (Array.isArray(data.multi_floor_summary.floors)) {
+          data.multi_floor_summary.floors.forEach(f => {
+            floorCacheRef.current[f.index] = {
+              elements: f.elements || [],
+              items: Array.isArray(f.violations) ? f.violations.map(toUiFinding) : [],
+              floorTitle: f.title
+            };
+          });
+        }
       }
       await loadDrawingData(newDrawingId, {
         name: file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' '),
@@ -361,7 +397,29 @@ function App() {
   const handleFloorSwitch = async (pageIndex) => {
     if (pageIndex === drawingMeta.pageIndex) return;
 
-    setFloorSwitching(true);
+    // 1. Instant optimistic local transition if cached
+    const cached = floorCacheRef.current[pageIndex];
+    const targetPage = drawingMeta.pages?.find(p => p.index === pageIndex);
+    const floorTitle = cached?.floorTitle || targetPage?.title || `Floor Level 0${pageIndex}`;
+
+    if (cached) {
+      // Instant switch with zero lag and no loading overlay
+      setElements(cached.elements || []);
+      setItems(cached.items || []);
+      setSelected(null);
+      setDrawingMeta(prev => ({
+        ...prev,
+        floor: floorTitle,
+        pageIndex: pageIndex,
+        imageTimestamp: Date.now()
+      }));
+      notify(`Switched overview to ${floorTitle}`);
+    } else {
+      // If not yet cached, show lightweight floor indicator
+      setFloorSwitching(true);
+    }
+
+    // 2. Asynchronously notify backend of active page and refresh
     try {
       const res = await fetch(`${API_URL}/drawings/${currentDrawingId}/page`, {
         method: 'POST',
@@ -371,25 +429,36 @@ function App() {
 
       if (res.ok) {
         const data = await res.json();
-        const targetPage = drawingMeta.pages?.find(p => p.index === pageIndex);
-        const floorTitle = targetPage?.title || data.floor_name || `Floor Level 0${pageIndex}`;
-        
         if (data.multi_floor_summary) {
           setMultiFloorSummary(data.multi_floor_summary);
+          if (Array.isArray(data.multi_floor_summary.floors)) {
+            data.multi_floor_summary.floors.forEach(f => {
+              floorCacheRef.current[f.index] = {
+                elements: f.elements || [],
+                items: Array.isArray(f.violations) ? f.violations.map(toUiFinding) : [],
+                floorTitle: f.title
+              };
+            });
+          }
         }
-
-        await loadDrawingData(currentDrawingId, {
-          floor: floorTitle,
-          pageIndex: pageIndex,
-          imageTimestamp: Date.now()
-        });
-        notify(`Switched overview to ${floorTitle}`);
-      } else {
-        throw new Error('Floor switch failed with status ' + res.status);
+        // If it wasn't cached before, apply newly received elements and violations now
+        if (!cached) {
+          const freshTarget = floorCacheRef.current[pageIndex];
+          if (freshTarget) {
+            setElements(freshTarget.elements || []);
+            setItems(freshTarget.items || []);
+          }
+          setDrawingMeta(prev => ({
+            ...prev,
+            floor: data.floor_name || floorTitle,
+            pageIndex: pageIndex,
+            imageTimestamp: Date.now()
+          }));
+          notify(`Switched overview to ${data.floor_name || floorTitle}`);
+        }
       }
     } catch (err) {
-      console.error('Error switching floor:', err);
-      notify('Failed to switch floor page.');
+      console.warn('Background floor switch notification:', err);
     } finally {
       setFloorSwitching(false);
     }
@@ -655,7 +724,6 @@ function App() {
                     key={`floor-tab-${p.index}`}
                     className={`floor-btn ${isActive ? 'active' : ''}`}
                     onClick={() => handleFloorSwitch(p.index)}
-                    disabled={floorSwitching}
                   >
                     <span>{cleanTitle}</span>
                     {errCount !== undefined && (
@@ -727,7 +795,7 @@ function App() {
                 select={setSelected}
                 elements={elements}
                 findings={items}
-                loading={elementsLoading || floorSwitching}
+                loading={elementsLoading}
                 currentDrawingId={currentDrawingId}
                 drawingMeta={drawingMeta}
                 viewMode={viewMode}
@@ -747,26 +815,26 @@ function App() {
               </div>
 
               <div className="finding-list">
-                {(violationsLoading || floorSwitching) && (
+                {violationsLoading && (
                   <div className="loading-state">
                     <div className="spinner"></div>
                     <p>Analyzing floor plan...</p>
                   </div>
                 )}
-                {violationsError && !violationsLoading && !floorSwitching && (
+                {violationsError && !violationsLoading && (
                   <div className="error-state">
                     <AlertTriangle size={20} />
                     <p><strong>Notice</strong>: {violationsError}</p>
                   </div>
                 )}
-                {!violationsLoading && !floorSwitching && items.length === 0 && (
+                {!violationsLoading && items.length === 0 && (
                   <div className="empty-state">
                     <CheckCircle2 size={28} />
                     <p>100% Compliant</p>
                     <small>All travel distances & exit capacities on this floor satisfy UAE Fire & Life Safety Code requirements.</small>
                   </div>
                 )}
-                {!violationsLoading && !floorSwitching && items.map((f, idx) => {
+                {!violationsLoading && items.map((f, idx) => {
                   const isSelected = f.id === selected;
                   const isDone = f.status !== 'open';
                   return (

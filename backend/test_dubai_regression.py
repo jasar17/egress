@@ -228,6 +228,84 @@ def test_extended_code_clause_topics():
     assert corr_vs[0]["limit_value"] == 1200.0
     print("[PASS] Topic 'exit_corridor_width' verified on Sub-Standard Corridor (1000mm < 1200mm)")
 
+    # Test 4: dead_end_corridor (UAE-FLS-3.16-BUS-DE-S & UAE-FLS-3.16-BUS-DE-NS)
+    # Check on real Dubai Level 01 layout:
+    # West dead-end = 7.20m, East dead-end = 5.40m
+    dubai_l01_parsed = parse_pdf_file(backend_dir.parent / "floor plan" / "Dubai_Commercial_Building_FLS_Test_FloorPlans.pdf", page_index=1)
+    dubai_l01_parsed = calculate_walkable_distances(dubai_l01_parsed)
+    dubai_l01_parsed = calculate_occupant_loads(dubai_l01_parsed, con=con, default_occupancy="Business - Regular office areas")
+
+    # Sprinklered Business (limit = 15.0m per UAE-FLS-3.16-BUS-DE-S):
+    # Both 7.20m and 5.40m are compliant -> 0 violations
+    sp_vs = evaluate_fls_rules(dubai_l01_parsed, con=con, drawing_id="test_de_s", element_id_map={}, is_sprinklered=True)
+    de_sp_vs = [v for v in sp_vs if v["clause_ref"] == "UAE-FLS-3.16-BUS-DE-S"]
+    assert len(de_sp_vs) == 0, f"Expected 0 dead-end violations for sprinklered, got {len(de_sp_vs)}"
+    print("[PASS] Topic 'dead_end_corridor' (Sprinklered, 15.0m limit): Dubai Level 01 West (7.20m) and East (5.40m) both COMPLIANT (0 violations)")
+
+    # Non-Sprinklered Business (limit = 6.1m per UAE-FLS-3.16-BUS-DE-NS):
+    # West dead-end 7.20m > 6.1m -> FLAGGED as non-compliant!
+    ns_vs = evaluate_fls_rules(dubai_l01_parsed, con=con, drawing_id="test_de_ns", element_id_map={}, is_sprinklered=False)
+    de_ns_vs = [v for v in ns_vs if v["clause_ref"] == "UAE-FLS-3.16-BUS-DE-NS"]
+    assert len(de_ns_vs) == 1, f"Expected 1 dead-end violation for non-sprinklered, got {len(de_ns_vs)}"
+    assert de_ns_vs[0]["measured_value"] == 7.20
+    assert de_ns_vs[0]["limit_value"] == 6.1
+    print(f"[PASS] Topic 'dead_end_corridor' (Non-Sprinklered, 6.1m limit): West corridor dead-end correctly flagged ({de_ns_vs[0]['measured_value']}m > {de_ns_vs[0]['limit_value']}m, clause UAE-FLS-3.16-BUS-DE-NS)")
+
+    # Test 5: common_path_of_travel (UAE-FLS-3.16-BUS-CP-S & UAE-FLS-3.16-BUS-CP-NS)
+    # Check on real Dubai Level 01 rooms:
+    # Max measured common path is 5.98m (PANTRY / BREAKOUT), well within 30.0m limit
+    cp_rooms = {r["name"]: r.get("common_path_m", 0.0) for r in dubai_l01_parsed["rooms"]}
+    assert cp_rooms["OPEN OFFICE WEST"] == 2.45
+    assert cp_rooms["MEETING ROOM 1A"] == 5.88
+    assert cp_rooms["PANTRY / BREAKOUT"] == 5.98
+    print(f"[PASS] Topic 'common_path_of_travel' verified on Dubai Level 01: West Office={cp_rooms['OPEN OFFICE WEST']}m, Meeting 1A={cp_rooms['MEETING ROOM 1A']}m, Pantry={cp_rooms['PANTRY / BREAKOUT']}m (all <= 30.0m limit)")
+
+    # Synthetic excessive common path test (>30.0m)
+    excess_cp_drawing = {
+        "floor_name": "Diagnostic Extended Suite",
+        "rooms": [
+            {"name": "DEEP INTERIOR LAB", "area_m2": 50.0, "occupant_load": 10, "travel_distance_m": 45.0, "common_path_m": 34.5, "centroid": [15, 20]},
+        ],
+        "exits": [{"name": "STAIR 1", "pos": [10, 50]}, {"name": "STAIR 2", "pos": [90, 50]}],
+        "summary": {"width_m": 42.0, "height_m": 24.0}
+    }
+    excess_cp_vs = evaluate_fls_rules(excess_cp_drawing, con=con, drawing_id="test_excess_cp", element_id_map={}, is_sprinklered=True)
+    cp_flagged = [v for v in excess_cp_vs if v["clause_ref"] == "UAE-FLS-3.16-BUS-CP-S"]
+    assert len(cp_flagged) == 1
+    assert cp_flagged[0]["measured_value"] == 34.5
+    assert cp_flagged[0]["limit_value"] == 30.0
+    print(f"[PASS] Topic 'common_path_of_travel' correctly flagged excessive common path ({cp_flagged[0]['measured_value']}m > {cp_flagged[0]['limit_value']}m, clause UAE-FLS-3.16-BUS-CP-S)")
+
+    # Test 6: stair_width (UAE-FLS-3.4-STAIR-WIDTH-MIN, 1200mm limit)
+    # Dimensioned sub-standard stair test (1050mm < 1200mm)
+    narrow_stair_drawing = {
+        "floor_name": "Diagnostic Narrow Stair Layout",
+        "rooms": [{"name": "ROOM A", "area_m2": 50.0, "occupant_load": 20, "travel_distance_m": 10.0, "centroid": [30, 30]}],
+        "exits": [{"name": "STAIR 1", "pos": [10, 50]}, {"name": "STAIR 2", "pos": [90, 50]}],
+        "summary": {"stair_width_mm": 1050.0, "width_m": 42.0, "height_m": 24.0}
+    }
+    stair_vs = evaluate_fls_rules(narrow_stair_drawing, con=con, drawing_id="test_stair", element_id_map={})
+    stair_flagged = [v for v in stair_vs if v["clause_ref"] == "UAE-FLS-3.4-STAIR-WIDTH-MIN"]
+    assert len(stair_flagged) == 1
+    assert stair_flagged[0]["measured_value"] == 1050.0
+    assert stair_flagged[0]["limit_value"] == 1200.0
+    print(f"[PASS] Topic 'stair_width' correctly flagged sub-standard clear stair width ({stair_flagged[0]['measured_value']}mm < {stair_flagged[0]['limit_value']}mm, clause UAE-FLS-3.4-STAIR-WIDTH-MIN)")
+
+    # Test 7: exit_door_width (UAE-FLS-3.1-DOOR-WIDTH-MIN, 900mm limit)
+    # Dimensioned sub-standard door opening test (800mm < 900mm)
+    narrow_door_drawing = {
+        "floor_name": "Diagnostic Narrow Door Layout",
+        "rooms": [{"name": "ROOM A", "area_m2": 50.0, "occupant_load": 20, "travel_distance_m": 10.0, "centroid": [30, 30]}],
+        "exits": [{"name": "STAIR 1", "pos": [10, 50]}, {"name": "STAIR 2", "pos": [90, 50]}],
+        "summary": {"door_width_mm": 800.0, "width_m": 42.0, "height_m": 24.0}
+    }
+    door_vs = evaluate_fls_rules(narrow_door_drawing, con=con, drawing_id="test_door", element_id_map={})
+    door_flagged = [v for v in door_vs if v["clause_ref"] == "UAE-FLS-3.1-DOOR-WIDTH-MIN"]
+    assert len(door_flagged) == 1
+    assert door_flagged[0]["measured_value"] == 800.0
+    assert door_flagged[0]["limit_value"] == 900.0
+    print(f"[PASS] Topic 'exit_door_width' correctly flagged sub-standard clear door opening ({door_flagged[0]['measured_value']}mm < {door_flagged[0]['limit_value']}mm, clause UAE-FLS-3.1-DOOR-WIDTH-MIN)")
+
 
 if __name__ == "__main__":
     test_typical_office_floor_regression()

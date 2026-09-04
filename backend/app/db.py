@@ -392,12 +392,12 @@ def init_db() -> None:
                 );
                 CREATE TABLE IF NOT EXISTS device_room_links (
                   id TEXT PRIMARY KEY,
-                  project_id TEXT NOT NULL REFERENCES projects(id),
-                  device_element_id TEXT NOT NULL REFERENCES extracted_elements(id),
-                  device_drawing_id TEXT NOT NULL REFERENCES drawings(id),
+                  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                  device_element_id TEXT NOT NULL REFERENCES extracted_elements(id) ON DELETE CASCADE,
+                  device_drawing_id TEXT NOT NULL REFERENCES drawings(id) ON DELETE CASCADE,
                   device_tag TEXT,
                   device_type TEXT NOT NULL,
-                  room_element_id TEXT REFERENCES extracted_elements(id),
+                  room_element_id TEXT REFERENCES extracted_elements(id) ON DELETE SET NULL,
                   room_name TEXT NOT NULL,
                   status TEXT NOT NULL,
                   x_m REAL,

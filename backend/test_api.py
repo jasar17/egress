@@ -188,6 +188,7 @@ def test_full_flow():
     # Reconfigure drawing to non-sprinklered
     res = client.patch(f"/drawings/{nc_drawing_id}/config", json={"sprinklered": False})
     assert res.status_code == 200
+
     assert res.json()["sprinklered"] == 0
     print("[PASS] Dynamic sprinkler status toggle to non-sprinklered passed")
 

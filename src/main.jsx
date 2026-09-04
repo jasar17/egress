@@ -4,6 +4,8 @@ import {
   AlertTriangle,
   ArrowLeft,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Download,
   FileUp,
   LayoutDashboard,
@@ -96,6 +98,333 @@ const toUiFinding = (item) => {
     pos
   };
 };
+
+
+function FloorDropdownSelector({
+  projectDrawings = [],
+  currentDrawingId,
+  onSelectDrawing,
+  multiFloorSummary,
+  activePageIndex = 0,
+  onSelectPage,
+  onOpenAllFloorsModal,
+  formatTitleFn
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const containerRef = useRef(null);
+
+  // Close on outside click or Escape key
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen]);
+
+  // Build unified floor options
+  const floorOptions = useMemo(() => {
+    // Mode 1: Multiple project drawings (DXF files or individual sheets)
+    if (projectDrawings && projectDrawings.length > 1) {
+      return projectDrawings.map((d, idx) => {
+        const isCur = d.id === currentDrawingId;
+        const isFa = d.document_type === 'fire_alarm';
+        const title = formatTitleFn ? formatTitleFn(d) : (d.floor_name || d.name || `Floor ${idx + 1}`);
+        const errCount = d.violations_count !== undefined ? d.violations_count : 0;
+        const elCount = d.elements_count !== undefined ? d.elements_count : 0;
+        
+        let floorNum = `${idx}`;
+        const numMatch = (d.floor_name || d.name || title).match(/level\s*0*(\d+)/i);
+        if (numMatch) {
+          floorNum = numMatch[1].padStart(2, '0');
+        } else if ((d.floor_name || d.name || '').toLowerCase().includes('ground')) {
+          floorNum = '00';
+        }
+
+        let subtitle = isFa 
+          ? `Fire Alarm System • ${elCount} devices`
+          : `${(d.file_type || 'CAD').toUpperCase()} • ${elCount} elements`;
+        
+        const rawFloor = (d.floor_name || d.name || '').trim();
+        if (rawFloor && rawFloor !== title) {
+          subtitle = `${rawFloor} • ${subtitle}`;
+        }
+
+        return {
+          id: d.id,
+          mode: 'drawing',
+          title,
+          floorNum,
+          subtitle,
+          isFa,
+          errCount,
+          elCount,
+          isActive: isCur,
+          item: d
+        };
+      });
+    }
+
+    // Mode 2: Multi-page PDF floors (from multiFloorSummary)
+    if (multiFloorSummary?.floors && multiFloorSummary.floors.length > 0) {
+      return multiFloorSummary.floors.map((p) => {
+        const isActive = p.index === activePageIndex;
+        let cleanTitle = p.title || `Level 0${p.index}`;
+        if (cleanTitle.toLowerCase().includes('ground') || p.index === 0) {
+          cleanTitle = 'Level 00 (Ground)';
+        } else if (!cleanTitle.toLowerCase().includes('level')) {
+          cleanTitle = `Level 0${p.index}`;
+        }
+        const errCount = p.violations_count !== undefined ? p.violations_count : (p.violations ? p.violations.length : 0);
+        const elCount = p.elements ? p.elements.length : 0;
+
+        return {
+          id: `page-${p.index}`,
+          mode: 'page',
+          pageIndex: p.index,
+          title: cleanTitle,
+          floorNum: `${p.index}`.padStart(2, '0'),
+          subtitle: `Multi-Page Vector PDF • ${elCount || 12} elements`,
+          isFa: false,
+          errCount,
+          elCount,
+          isActive,
+          item: p
+        };
+      });
+    }
+
+    // Fallback: single floor
+    return [{
+      id: 'current',
+      mode: 'single',
+      title: 'Level 00 (Ground)',
+      floorNum: '00',
+      subtitle: 'Architectural Floor Plan',
+      isFa: false,
+      errCount: 0,
+      elCount: 0,
+      isActive: true,
+      item: null
+    }];
+  }, [projectDrawings, currentDrawingId, multiFloorSummary, activePageIndex, formatTitleFn]);
+
+  // Current active item
+  const activeIndex = floorOptions.findIndex(f => f.isActive);
+  const activeItem = activeIndex >= 0 ? floorOptions[activeIndex] : floorOptions[0];
+
+  const selectOption = (opt) => {
+    if (opt.mode === 'drawing') {
+      onSelectDrawing(opt.id, opt.title);
+    } else if (opt.mode === 'page') {
+      onSelectPage(opt.pageIndex);
+    }
+    setIsOpen(false);
+    setSearchQuery('');
+  };
+
+  const handlePrev = (e) => {
+    e.stopPropagation();
+    if (activeIndex > 0) {
+      selectOption(floorOptions[activeIndex - 1]);
+    }
+  };
+
+  const handleNext = (e) => {
+    e.stopPropagation();
+    if (activeIndex >= 0 && activeIndex < floorOptions.length - 1) {
+      selectOption(floorOptions[activeIndex + 1]);
+    }
+  };
+
+  // Filter options if search query present
+  const filtered = useMemo(() => {
+    if (!searchQuery.trim()) return floorOptions;
+    const q = searchQuery.toLowerCase();
+    return floorOptions.filter(f => 
+      f.title.toLowerCase().includes(q) || 
+      f.subtitle.toLowerCase().includes(q) ||
+      f.floorNum.includes(q)
+    );
+  }, [floorOptions, searchQuery]);
+
+  const totalViolations = floorOptions.reduce((acc, f) => acc + (f.errCount || 0), 0);
+
+  return (
+    <div className="floor-selector-wrapper" ref={containerRef}>
+      <div className="floor-selector-pill-group">
+        <span className="floor-selector-tag">FLOORS:</span>
+
+        {/* Previous Floor Stepper */}
+        <button
+          className="floor-nav-arrow-btn"
+          disabled={activeIndex <= 0}
+          onClick={handlePrev}
+          title={activeIndex > 0 ? `Previous Floor (${floorOptions[activeIndex - 1]?.title})` : 'First Floor'}
+          aria-label="Previous floor"
+        >
+          <ChevronLeft size={13} />
+        </button>
+
+        {/* Main Floor Dropdown Trigger */}
+        <button
+          className={`floor-dropdown-btn ${isOpen ? 'active-open' : ''}`}
+          onClick={() => setIsOpen(prev => !prev)}
+          title="Click to view all floors and switch"
+          aria-expanded={isOpen}
+        >
+          <span className="floor-trigger-icon">
+            {activeItem?.isFa ? '🚨' : <Building2 size={13} />}
+          </span>
+          <span className="floor-trigger-name">{activeItem?.title || 'Select Floor'}</span>
+          
+          {activeItem?.isFa ? (
+            <span className="floor-badge-pill fa">
+              {activeItem.elCount} dev
+            </span>
+          ) : (
+            <span className={`floor-badge-pill ${activeItem?.errCount > 0 ? 'err' : 'ok'}`}>
+              {activeItem?.errCount > 0 ? `${activeItem.errCount} ⚠️` : '✓'}
+            </span>
+          )}
+
+          <ChevronDown size={13} className={`floor-chevron-icon ${isOpen ? 'open' : ''}`} />
+        </button>
+
+        {/* Next Floor Stepper */}
+        <button
+          className="floor-nav-arrow-btn"
+          disabled={activeIndex >= floorOptions.length - 1 || activeIndex === -1}
+          onClick={handleNext}
+          title={activeIndex < floorOptions.length - 1 ? `Next Floor (${floorOptions[activeIndex + 1]?.title})` : 'Last Floor'}
+          aria-label="Next floor"
+        >
+          <ChevronRight size={13} />
+        </button>
+      </div>
+
+      {/* Dropdown Floating Panel */}
+      {isOpen && (
+        <div className="floor-dropdown-popover">
+          <div className="floor-dropdown-popover-header">
+            <div className="fd-header-left">
+              <Layers size={14} className="text-red" />
+              <span className="fd-header-title">Building Floors & Plans</span>
+            </div>
+            <span className="fd-header-badge">
+              {floorOptions.length} Levels
+            </span>
+          </div>
+
+          {floorOptions.length > 4 && (
+            <div className="floor-dropdown-search-wrap">
+              <Search size={13} className="search-icon" />
+              <input
+                type="text"
+                className="floor-search-input"
+                placeholder="Search level or drawing..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                autoFocus
+              />
+              {searchQuery && (
+                <button className="search-clear-btn" onClick={() => setSearchQuery('')}>
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="floor-dropdown-items-scroll">
+            {filtered.map((opt) => (
+              <div
+                key={opt.id}
+                className={`floor-menu-item ${opt.isActive ? 'item-active' : ''}`}
+                onClick={() => selectOption(opt)}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="menu-item-left">
+                  <span className={`floor-index-pill ${opt.isFa ? 'pill-fa' : ''}`}>
+                    {opt.isFa ? 'FA' : `L${opt.floorNum}`}
+                  </span>
+                  <div className="menu-item-text">
+                    <div className="menu-item-title-row">
+                      <span className="menu-item-title">{opt.title}</span>
+                      {opt.isActive && (
+                        <span className="active-check-badge">
+                          <Check size={11} /> Active
+                        </span>
+                      )}
+                    </div>
+                    <span className="menu-item-subtitle">{opt.subtitle}</span>
+                  </div>
+                </div>
+
+                <div className="menu-item-right">
+                  {opt.isFa ? (
+                    <span className="menu-status-pill fa">
+                      {opt.elCount} dev
+                    </span>
+                  ) : opt.errCount > 0 ? (
+                    <span className="menu-status-pill err">
+                      {opt.errCount} ⚠️
+                    </span>
+                  ) : (
+                    <span className="menu-status-pill ok">
+                      ✓ Pass
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {filtered.length === 0 && (
+              <div className="floor-menu-empty">
+                No floor plans matching "{searchQuery}"
+              </div>
+            )}
+          </div>
+
+          <div className="floor-dropdown-footer">
+            <div className="fd-footer-summary">
+              {totalViolations > 0 ? (
+                <span className="fd-summary-warn">⚠️ {totalViolations} total issues found across floors</span>
+              ) : (
+                <span className="fd-summary-ok">✓ All floors compliant with UAE FLSC</span>
+              )}
+            </div>
+            {onOpenAllFloorsModal && (
+              <button
+                className="fd-all-floors-action-btn"
+                onClick={() => {
+                  setIsOpen(false);
+                  onOpenAllFloorsModal();
+                }}
+              >
+                <Grid size={13} /> View All Floors Grid Overview
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 
 function App() {
@@ -302,8 +631,10 @@ function App() {
       return 'Level 00 (Ground)';
     }
     if (/Level\s*0*1\b/i.test(clean)) {
-      if (/Typical/i.test(clean) || /Office/i.test(clean)) return 'Level 01 (Office)';
       if (/Arch/i.test(clean)) return 'Level 01 (Arch)';
+      if (/Typical/i.test(clean) && /Office/i.test(clean)) return 'Level 01 (Office Typical)';
+      if (/Typical/i.test(clean)) return 'Level 01 (Typical)';
+      if (/Office/i.test(clean)) return 'Level 01 (Office)';
       return 'Level 01';
     }
     if (/Level\s*0*2\b/i.test(clean)) {
@@ -863,116 +1194,22 @@ function App() {
         <main className={`viewer ${mobileTab === 'plan' ? 'mobile-active' : ''}`}>
           {/* SINGLE UNIFIED TOP CONTROL BAR */}
           <div className="unified-top-bar">
-            {/* Project Floor & Drawing Tabs */}
-            {validProjectDrawings && validProjectDrawings.length > 1 ? (
-              <div
-                className="floor-tabs-unified"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  overflowX: 'auto',
-                  flex: 1,
-                  minWidth: 0,
-                  paddingRight: '10px',
-                  scrollbarWidth: 'none'
-                }}
-              >
-                <span style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800, whiteSpace: 'nowrap', marginRight: '4px' }}>
-                  Floors:
-                </span>
-                {validProjectDrawings.map((d) => {
-                  const isCur = d.id === currentDrawingId;
-                  const isFa = d.document_type === 'fire_alarm';
-                  const title = formatFloorTabTitle(d);
-                  const errCount = d.violations_count !== undefined ? d.violations_count : 0;
-                  return (
-                    <button
-                      key={`proj-drw-${d.id}`}
-                      className={`floor-btn ${isCur ? 'active' : ''}`}
-                      onClick={() => {
-                        if (!isCur) {
-                          setCurrentDrawingId(d.id);
-                          notify(`Switched to ${title}`);
-                        }
-                      }}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        padding: '5px 12px',
-                        borderRadius: '20px',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                        transition: 'all 0.15s ease',
-                        border: isCur
-                          ? (isFa ? '1px solid #ef4444' : '1px solid #dc2626')
-                          : '1px solid rgba(0,0,0,0.1)',
-                        background: isCur
-                          ? (isFa ? '#ef4444' : '#dc2626')
-                          : 'var(--bg-muted, #f1f5f9)',
-                        color: isCur ? '#ffffff' : 'var(--ink-secondary, #475569)'
-                      }}
-                      title={`${d.floor_name || d.name || title} (${d.elements_count || 0} elements)`}
-                    >
-                      <span>{title}</span>
-                      {isFa ? (
-                        <span style={{
-                          fontSize: '9px',
-                          fontWeight: 800,
-                          padding: '1px 5px',
-                          borderRadius: '8px',
-                          background: isCur ? 'rgba(0,0,0,0.25)' : 'rgba(239, 68, 68, 0.15)',
-                          color: isCur ? '#ffffff' : '#ef4444'
-                        }}>
-                          {d.elements_count || 0} dev
-                        </span>
-                      ) : (
-                        <span
-                          className={`err-pill ${errCount > 0 ? 'err' : 'ok'}`}
-                          style={isCur ? { background: 'rgba(0,0,0,0.25)', color: '#ffffff' } : {}}
-                        >
-                          {errCount > 0 ? `${errCount} ⚠️` : '✓'}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              /* Fallback for single drawing with multi-page PDF floors */
-              multiFloorSummary?.floors && multiFloorSummary.floors.length > 1 ? (
-                <div className="floor-tabs-unified" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflowX: 'auto', flex: 1, minWidth: 0, paddingRight: '10px' }}>
-                  <span style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800, whiteSpace: 'nowrap', marginRight: '4px' }}>
-                    Floors:
-                  </span>
-                  {multiFloorSummary.floors.map((p) => {
-                    const isActive = p.index === drawingMeta.pageIndex;
-                    let cleanTitle = p.title || `Level 0${p.index}`;
-                    if (cleanTitle.toLowerCase().includes('ground') || p.index === 0) {
-                      cleanTitle = 'Level 00 (Ground)';
-                    } else if (!cleanTitle.toLowerCase().includes('level')) {
-                      cleanTitle = `Level 0${p.index}`;
-                    }
-                    const errCount = p.violations_count !== undefined ? p.violations_count : (p.violations ? p.violations.length : 0);
-                    return (
-                      <button
-                        key={`floor-tab-${p.index}`}
-                        className={`floor-btn ${isActive ? 'active' : ''}`}
-                        onClick={() => handleFloorSwitch(p.index)}
-                      >
-                        <span>{cleanTitle}</span>
-                        <span className={`err-pill ${errCount > 0 ? 'err' : 'ok'}`}>
-                          {errCount > 0 ? `${errCount} ⚠️` : '✓'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null
-            )}
+            {/* Unified Floor Dropdown Selector */}
+            <FloorDropdownSelector
+              projectDrawings={validProjectDrawings}
+              currentDrawingId={currentDrawingId}
+              onSelectDrawing={(id, title) => {
+                if (id !== currentDrawingId) {
+                  setCurrentDrawingId(id);
+                  notify(`Switched to ${title}`);
+                }
+              }}
+              multiFloorSummary={multiFloorSummary}
+              activePageIndex={drawingMeta.pageIndex}
+              onSelectPage={handleFloorSwitch}
+              onOpenAllFloorsModal={() => setShowMultiFloorOverview(true)}
+              formatTitleFn={formatFloorTabTitle}
+            />
 
             {/* View mode & actions */}
             <div className="top-actions">

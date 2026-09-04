@@ -210,8 +210,14 @@ class PostgresConnectionWrapper:
 def get_db() -> Generator[Any, None, None]:
     if is_postgres():
         if PSYCOPG2_AVAILABLE:
+            raw_conn = None
             try:
                 raw_conn = psycopg2.connect(get_postgres_url(), connect_timeout=3)
+            except Exception as e:
+                import logging
+                logging.getLogger("uvicorn").warning(f"Postgres connection failed ({e}). Falling back to local SQLite.")
+
+            if raw_conn is not None:
                 conn_wrapper = PostgresConnectionWrapper(raw_conn)
                 try:
                     yield conn_wrapper
@@ -222,9 +228,6 @@ def get_db() -> Generator[Any, None, None]:
                 finally:
                     conn_wrapper.close()
                 return
-            except Exception as e:
-                import logging
-                logging.getLogger("uvicorn").warning(f"Postgres connection failed ({e}). Falling back to local SQLite.")
         else:
             import logging
             logging.getLogger("uvicorn").warning("psycopg2 is not available. Falling back to local SQLite.")

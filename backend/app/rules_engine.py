@@ -51,7 +51,9 @@ def evaluate_fls_rules(
     })
 
     # Topic: two_exit_doors_required_by_area
-    if "EDUCATIONAL" in occupancy_type.upper():
+    if "ASSEMBLY" in occupancy_type.upper():
+        area_clause_id = "UAE-FLS-3.17-ASSM-ROOM-AREA"
+    elif "EDUCATIONAL" in occupancy_type.upper():
         area_clause_id = "UAE-FLS-3.20-EDU-ROOM-AREA"
     elif "HEALTH" in occupancy_type.upper() or "HOSPITAL" in occupancy_type.upper():
         area_clause_id = "UAE-FLS-3.22-HLTH-ROOM-AREA"
@@ -60,10 +62,10 @@ def evaluate_fls_rules(
 
     two_doors_area_clause = all_clauses.get(area_clause_id, {
         "clause_id": area_clause_id,
-        "value": 280.0 if area_clause_id == "UAE-FLS-3.19-BUS-ROOM-AREA" else 93.0,
+        "value": 280.0 if area_clause_id in ("UAE-FLS-3.19-BUS-ROOM-AREA", "UAE-FLS-3.17-ASSM-ROOM-AREA") else 93.0,
         "unit": "m2",
-        "source_table": "Table 3.19" if area_clause_id == "UAE-FLS-3.19-BUS-ROOM-AREA" else ("Table 3.20" if area_clause_id == "UAE-FLS-3.20-EDU-ROOM-AREA" else "Table 3.22"),
-        "source_page": 304 if area_clause_id == "UAE-FLS-3.19-BUS-ROOM-AREA" else (305 if area_clause_id == "UAE-FLS-3.20-EDU-ROOM-AREA" else 310),
+        "source_table": "Table 3.17" if area_clause_id == "UAE-FLS-3.17-ASSM-ROOM-AREA" else ("Table 3.19" if area_clause_id == "UAE-FLS-3.19-BUS-ROOM-AREA" else ("Table 3.20" if area_clause_id == "UAE-FLS-3.20-EDU-ROOM-AREA" else "Table 3.22")),
+        "source_page": 302 if area_clause_id == "UAE-FLS-3.17-ASSM-ROOM-AREA" else (304 if area_clause_id == "UAE-FLS-3.19-BUS-ROOM-AREA" else (305 if area_clause_id == "UAE-FLS-3.20-EDU-ROOM-AREA" else 310)),
         "occupancy": occupancy_type,
     })
 
@@ -198,7 +200,6 @@ def evaluate_fls_rules(
             })
 
     # --- TOPIC 2: two_exit_doors_required_by_area ---
-    max_single_door_area = float(two_doors_area_clause["value"])
     for room in rooms:
         name_upper = room.get("name", "").upper()
         if "STAIR" in name_upper or "EXIT" in name_upper:
@@ -209,24 +210,31 @@ def evaluate_fls_rules(
         elem_id = element_id_map.get(room_name)
         svg_centroid = room.get("centroid", (50, 35))
 
-        if area_m2 > max_single_door_area:
+        if "ASSEMBLY" in occupancy_type.upper() or "MULTI-PURPOSE" in name_upper or "AUDITORIUM" in name_upper or "THEATER" in name_upper:
+            room_area_clause = all_clauses.get("UAE-FLS-3.17-ASSM-ROOM-AREA", two_doors_area_clause)
+        else:
+            room_area_clause = two_doors_area_clause
+
+        max_room_area = float(room_area_clause["value"])
+
+        if area_m2 > max_room_area:
             v_id = f"V-{uuid.uuid4().hex[:6].upper()}"
             violations.append({
                 "id": v_id,
                 "drawing_id": drawing_id,
                 "type": "Two exit doors required by area",
                 "related_element_id": elem_id,
-                "clause_ref": two_doors_area_clause["clause_id"],
+                "clause_ref": room_area_clause["clause_id"],
                 "measured_value": area_m2,
                 "measured_unit": "m2",
-                "limit_value": max_single_door_area,
+                "limit_value": max_room_area,
                 "limit_unit": "m2",
                 "severity": "Critical",
                 "status": "open",
                 "note": None,
                 "geometry": {"type": "Point", "coordinates": list(svg_centroid)},
-                "title": f"Room area exceeds single-door maximum ({area_m2} m2 > {max_single_door_area} m2)",
-                "detail": f"{room_name} has a floor area of {area_m2} m2. Rooms exceeding {max_single_door_area} m2 require at least 2 remote exit doors per UAE FLS {two_doors_area_clause['source_table']} ({two_doors_area_clause['clause_id']}).",
+                "title": f"Room area exceeds single-door maximum ({area_m2} m2 > {max_room_area} m2)",
+                "detail": f"{room_name} has a floor area of {area_m2} m2. Rooms exceeding {max_room_area} m2 require at least 2 remote exit doors per UAE FLS {room_area_clause['source_table']} ({room_area_clause['clause_id']}).",
             })
 
     # --- TOPIC 3: single_exit_door_permission ---

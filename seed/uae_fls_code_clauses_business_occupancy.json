@@ -2,7 +2,7 @@
   "_meta": {
     "source_document": "UAE Fire and Life Safety Code of Practice (CDGH-OP-25), September 2018 edition (1348 pages)",
     "extraction_scope": "Full Bucket 1 Plan-Verifiable dataset covering Chapters 1 through 20 and Annexures 1 and 2",
-    "total_clauses": 168,
+    "total_clauses": 169,
     "topics_covered": [
       "accessible_door_geometry",
       "accessible_ramp_geometry",
@@ -1248,6 +1248,18 @@
       "note": "A single exit door is allowed only if occupant load <100 AND exit discharges directly outside with travel to outside <=30m.",
       "source_table": "Table 3.19",
       "source_page": 304
+    },
+    {
+      "clause_id": "UAE-FLS-3.17-ASSM-ROOM-AREA",
+      "topic": "two_exit_doors_required_by_area",
+      "occupancy": "Assembly - Room or Space",
+      "requirement_type": "max_area_for_single_exit",
+      "value": 280.0,
+      "unit": "m2",
+      "condition": null,
+      "note": "Rooms exceeding 280 m2 in area require 2 exit doors from that room, remotely located as per Section 4.4.",
+      "source_table": "Table 3.17",
+      "source_page": 302
     },
     {
       "clause_id": "UAE-FLS-3.19-BUS-ROOM-AREA",

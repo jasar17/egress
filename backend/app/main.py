@@ -95,7 +95,7 @@ def seed_demo(con: sqlite3.Connection) -> None:
     con.execute("DELETE FROM extracted_elements WHERE drawing_id = ?", (drawing_id,))
     con.execute("DELETE FROM violations WHERE drawing_id = ?", (drawing_id,))
     con.execute("INSERT OR REPLACE INTO projects VALUES (?, ?, ?, ?, ?, ?)", (project_id, "Al Noor Business Centre", "Al Noor Properties", now(), "Business - Regular office areas", 1))
-    con.execute("INSERT OR REPLACE INTO drawings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (drawing_id, project_id, None, "dxf", "Business - Regular office areas", 100, "ready", now(), 1, 0, "Level 06 - Architectural CAD Overview"))
+    con.execute("INSERT OR REPLACE INTO drawings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (drawing_id, project_id, None, "dxf", "Business - Regular office areas", 100, "ready", now(), 1, 0, "Level 06 - Architectural CAD Overview", "architectural"))
     element_ids: dict[str, str] = {}
     for item_type, name, geometry in demo_elements():
         item_id = str(uuid.uuid4())
@@ -138,7 +138,7 @@ def invalidate_drawing_cache(drawing_id: str) -> None:
             _IMAGE_CACHE.pop(k, None)
 
 
-from app.dxf_parser import DXFParseError, parse_dxf_file
+from app.dxf_parser import DXFParseError, parse_dxf_file, parse_fire_alarm_dxf_file
 from app.occupant_load import calculate_occupant_loads
 from app.path_analysis import calculate_walkable_distances
 from app.pdf_parser import PDFParseError, get_pdf_pages_metadata, parse_pdf_file
@@ -202,6 +202,44 @@ def process_upload(drawing_id: str, page_index: int | None = None) -> None:
 
         file_path, _ = ensure_drawing_file(drawing_id, con)
         file_url = str(file_path) if file_path else drawing["file_url"]
+
+        doc_type = drawing["document_type"] if "document_type" in drawing.keys() and drawing["document_type"] else "architectural"
+
+        if file_url and doc_type == "fire_alarm":
+            try:
+                parsed = parse_fire_alarm_dxf_file(file_url, drawing_scale=drawing["scale"])
+                floor_name = drawing["floor_name"] or Path(file_url).stem.replace("_", " ")
+                elements = parsed["elements"]
+                if not elements:
+                    raise DXFParseError("No fire alarm devices could be extracted from this DXF file.")
+
+                con.execute("DELETE FROM extracted_elements WHERE drawing_id = ?", (drawing_id,))
+                con.execute("DELETE FROM violations WHERE drawing_id = ?", (drawing_id,))
+
+                for item_type, name, geom in elements:
+                    item_id = str(uuid.uuid4())
+                    con.execute(
+                        "INSERT INTO extracted_elements VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            item_id,
+                            drawing_id,
+                            item_type,
+                            name,
+                            json.dumps(geom["geometry"]),
+                            json.dumps(geom.get("properties", {})),
+                        ),
+                    )
+
+                con.execute("UPDATE drawings SET status = 'ready', floor_name = ?, page_index = 0 WHERE id = ?", (floor_name, drawing_id))
+                try:
+                    from app.linking import link_fire_alarm_devices_to_rooms
+                    link_fire_alarm_devices_to_rooms(drawing["project_id"], con)
+                except Exception as link_err:
+                    print(f"Notice: Cross-document auto-linking skipped: {link_err}")
+            except Exception as e:
+                con.execute("UPDATE drawings SET status = 'failed' WHERE id = ?", (drawing_id,))
+                raise HTTPException(400, f"Fire Alarm DXF Parsing Failed: {str(e)}")
+            return
 
         if file_url and file_type in ("dxf", "pdf"):
             try:
@@ -272,6 +310,11 @@ def process_upload(drawing_id: str, page_index: int | None = None) -> None:
                     )
 
                 con.execute("UPDATE drawings SET status = 'ready', floor_name = ?, page_index = ? WHERE id = ?", (floor_name, active_page, drawing_id))
+                try:
+                    from app.linking import link_fire_alarm_devices_to_rooms
+                    link_fire_alarm_devices_to_rooms(drawing["project_id"], con)
+                except Exception as link_err:
+                    print(f"Notice: Cross-document auto-linking skipped: {link_err}")
             except Exception as e:
                 con.execute("UPDATE drawings SET status = 'failed' WHERE id = ?", (drawing_id,))
                 raise HTTPException(400, f"{file_type.upper()} Parsing Failed: {str(e)}")
@@ -353,14 +396,77 @@ def create_project(payload: ProjectCreate) -> dict[str, Any]:
     return project
 
 
+@app.get("/projects/{project_id}/drawings")
+def list_project_drawings(project_id: str) -> list[dict[str, Any]]:
+    """Returns all drawings (architectural floor plans, fire alarm shop drawings, etc.) linked to a project."""
+    with db() as con:
+        if not con.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found.")
+        drawings = con.execute("SELECT * FROM drawings WHERE project_id = ? ORDER BY created_at DESC", (project_id,)).fetchall()
+        res = []
+        for d in drawings:
+            d_dict = dict(d)
+            elem_count = con.execute("SELECT COUNT(*) as c FROM extracted_elements WHERE drawing_id = ?", (d["id"],)).fetchone()["c"]
+            v_count = con.execute("SELECT COUNT(*) as c FROM violations WHERE drawing_id = ?", (d["id"],)).fetchone()["c"]
+            d_dict["elements_count"] = elem_count
+            d_dict["violations_count"] = v_count
+            d_dict["document_type"] = d_dict.get("document_type", "architectural")
+            d_dict["name"] = d_dict.get("floor_name") or f"Drawing {d['id'][:8]}"
+            res.append(d_dict)
+        return res
+
+
+@app.post("/projects/{project_id}/link-devices")
+def trigger_project_device_linking(project_id: str) -> dict[str, Any]:
+    """Triggers cross-document entity linking between fire alarm devices and architectural room polygons."""
+    with db() as con:
+        if not con.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found.")
+        from app.linking import link_fire_alarm_devices_to_rooms
+        links = link_fire_alarm_devices_to_rooms(project_id, con)
+        return {
+            "project_id": project_id,
+            "total_devices": len(links),
+            "assigned_rooms_count": sum(1 for l in links if l["status"] == "assigned_room"),
+            "unassigned_corridor_count": sum(1 for l in links if l["status"] == "unassigned_corridor"),
+            "links": links
+        }
+
+
+@app.get("/projects/{project_id}/device-links")
+def get_device_links_endpoint(project_id: str) -> list[dict[str, Any]]:
+    """Returns all cross-document linked fire alarm devices for a project."""
+    with db() as con:
+        if not con.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found.")
+        from app.linking import get_project_device_links
+        return get_project_device_links(project_id, con)
+
+
+@app.get("/drawings/{drawing_id}/device-links")
+def get_drawing_device_links_endpoint(drawing_id: str) -> list[dict[str, Any]]:
+    """Returns cross-document linked fire alarm devices for a specific drawing."""
+    with db() as con:
+        drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
+        if not drawing:
+            raise HTTPException(404, "Drawing not found.")
+        from app.linking import get_project_device_links
+        all_links = get_project_device_links(drawing["project_id"], con)
+        return [l for l in all_links if l["device_drawing_id"] == drawing_id]
+
+
 @app.post("/projects/{project_id}/drawings", status_code=201)
 async def upload_drawing(
     project_id: str,
     file: UploadFile = File(...),
+    document_type: str = Form("architectural"),
     occupancy_type: str = Form("Business - Regular office areas"),
     sprinklered: bool = Form(True),
     scale: float = Form(100)
 ) -> dict[str, Any]:
+    doc_type = (document_type or "architectural").strip().lower()
+    if doc_type not in ("architectural", "fire_alarm"):
+        raise HTTPException(400, f"Unsupported document_type '{document_type}'. Must be 'architectural' or 'fire_alarm'.")
     if not occupancy_type or not occupancy_type.strip():
         raise HTTPException(400, "Occupancy type is required to select appropriate UAE FLS Code limits.")
     suffix = Path(file.filename or "").suffix.lower()
@@ -378,8 +484,8 @@ async def upload_drawing(
         # Initial floor name guess from filename
         raw_floor = Path(file.filename or "").stem.replace("_", " ")
         con.execute(
-            "INSERT INTO drawings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (drawing_id, project_id, str(target), suffix[1:], occupancy_type.strip(), scale, "processing", now(), 1 if sprinklered else 0, 0, raw_floor)
+            "INSERT INTO drawings VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (drawing_id, project_id, str(target), suffix[1:], occupancy_type.strip(), scale, "processing", now(), 1 if sprinklered else 0, 0, raw_floor, doc_type)
         )
         # Store file binary in persistent Supabase PostgreSQL storage
         save_drawing_file(drawing_id, file.filename or f"drawing_{drawing_id[:8]}{suffix}", suffix[1:], content, con)
@@ -412,6 +518,8 @@ async def upload_drawing(
 
     return {
         "drawing_id": drawing_id,
+        "project_id": project_id,
+        "document_type": doc_type,
         "status": final_status,
         "file_name": file.filename or f"drawing_{drawing_id[:8]}",
         "floor_name": final_floor,
@@ -545,6 +653,39 @@ def compute_multi_floor_summary(drawing_id: str, con: sqlite3.Connection) -> dic
 
     file_path, _ = ensure_drawing_file(drawing_id, con)
     file_url = str(file_path) if file_path else drawing["file_url"]
+
+    doc_type = drawing["document_type"] if "document_type" in drawing.keys() and drawing["document_type"] else "architectural"
+    if doc_type == "fire_alarm":
+        db_elements = con.execute("SELECT * FROM extracted_elements WHERE drawing_id = ?", (drawing_id,)).fetchall()
+        elem_features = [serialize_element(e) for e in db_elements]
+        devices = [e for e in db_elements if e["type"] != "wall"]
+        floor_title = drawing["floor_name"] or "Fire Alarm Shop Drawing"
+        result = {
+            "drawing_id": drawing_id,
+            "document_type": "fire_alarm",
+            "total_pages": 1,
+            "active_page_index": 0,
+            "total_violations_count": 0,
+            "floors": [{
+                "index": 0,
+                "title": floor_title,
+                "rooms_count": 0,
+                "walls_count": len(db_elements) - len(devices),
+                "doors_count": 0,
+                "exits_count": 0,
+                "devices_count": len(devices),
+                "total_occupant_load": 0,
+                "total_floor_area_m2": 0.0,
+                "max_travel_distance_m": 0.0,
+                "violations_count": 0,
+                "status": "COMPLIANT",
+                "violations": [],
+                "elements": elem_features,
+                "rooms_summary": []
+            }]
+        }
+        _MULTI_FLOOR_CACHE[cache_key] = result
+        return result
 
     if not file_url or not Path(file_url).exists():
         # Demo drawing fallback
@@ -918,6 +1059,7 @@ def get_drawing(drawing_id: str) -> dict[str, Any]:
         ]
         d_dict["multi_floor_summary"] = summary
         d_dict["has_image"] = d_dict.get("file_type") == "pdf"
+        d_dict["document_type"] = d_dict.get("document_type", "architectural")
         return d_dict
 
 

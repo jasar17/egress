@@ -16,6 +16,13 @@ try:
 except ImportError:
     PSYCOPG2_AVAILABLE = False
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+except ImportError:
+    pass
+
 BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
 SQLITE_DB_PATH = Path(os.getenv("FLS_DATABASE_PATH", DATA_DIR / "fls_demo.db"))
@@ -28,7 +35,9 @@ def get_raw_db_url() -> Optional[str]:
     return os.getenv("DATABASE_URL") or os.getenv("SUPABASE_DB_URL") or DEFAULT_SUPABASE_URL
 
 
-def is_postgres() -> bool:
+def is_postgres(con: Any = None) -> bool:
+    if con is not None:
+        return isinstance(con, PostgresConnectionWrapper)
     url = get_raw_db_url()
     return bool(url and (url.startswith("postgres://") or url.startswith("postgresql://")))
 
@@ -87,8 +96,8 @@ class PostgresCursorWrapper:
             """
         elif "INSERT OR REPLACE INTO drawings" in query:
             query = """
-            INSERT INTO drawings (id, project_id, file_url, file_type, occupancy_type, scale, status, created_at, sprinklered, page_index, floor_name)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO drawings (id, project_id, file_url, file_type, occupancy_type, scale, status, created_at, sprinklered, page_index, floor_name, document_type)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 file_url = EXCLUDED.file_url,
                 file_type = EXCLUDED.file_type,
@@ -97,7 +106,8 @@ class PostgresCursorWrapper:
                 status = EXCLUDED.status,
                 sprinklered = EXCLUDED.sprinklered,
                 page_index = EXCLUDED.page_index,
-                floor_name = EXCLUDED.floor_name
+                floor_name = EXCLUDED.floor_name,
+                document_type = EXCLUDED.document_type
             """
         elif "INSERT OR REPLACE INTO drawing_files" in query:
             query = """
@@ -108,6 +118,21 @@ class PostgresCursorWrapper:
                 file_type = EXCLUDED.file_type,
                 file_bytes = EXCLUDED.file_bytes,
                 created_at = EXCLUDED.created_at
+            """
+        elif "INSERT OR REPLACE INTO device_room_links" in query:
+            query = """
+            INSERT INTO device_room_links (
+                id, project_id, device_element_id, device_drawing_id, device_tag,
+                device_type, room_element_id, room_name, status, x_m, y_m, svg_x, svg_y, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                room_element_id = EXCLUDED.room_element_id,
+                room_name = EXCLUDED.room_name,
+                status = EXCLUDED.status,
+                x_m = EXCLUDED.x_m,
+                y_m = EXCLUDED.y_m,
+                svg_x = EXCLUDED.svg_x,
+                svg_y = EXCLUDED.svg_y
             """
 
         if params is not None:
@@ -180,31 +205,38 @@ class PostgresConnectionWrapper:
 @contextmanager
 def get_db() -> Generator[Any, None, None]:
     if is_postgres():
-        if not PSYCOPG2_AVAILABLE:
-            raise RuntimeError("psycopg2 is required to connect to Postgres. Run: pip install psycopg2-binary")
-        raw_conn = psycopg2.connect(get_postgres_url())
-        conn_wrapper = PostgresConnectionWrapper(raw_conn)
-        try:
-            yield conn_wrapper
-            conn_wrapper.commit()
-        except Exception:
-            raw_conn.rollback()
-            raise
-        finally:
-            conn_wrapper.close()
-    else:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(SQLITE_DB_PATH)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        try:
-            yield connection
-            connection.commit()
-        except Exception:
-            connection.rollback()
-            raise
-        finally:
-            connection.close()
+        if PSYCOPG2_AVAILABLE:
+            try:
+                raw_conn = psycopg2.connect(get_postgres_url(), connect_timeout=3)
+                conn_wrapper = PostgresConnectionWrapper(raw_conn)
+                try:
+                    yield conn_wrapper
+                    conn_wrapper.commit()
+                except Exception:
+                    raw_conn.rollback()
+                    raise
+                finally:
+                    conn_wrapper.close()
+                return
+            except Exception as e:
+                import logging
+                logging.getLogger("uvicorn").warning(f"Postgres connection failed ({e}). Falling back to local SQLite.")
+        else:
+            import logging
+            logging.getLogger("uvicorn").warning("psycopg2 is not available. Falling back to local SQLite.")
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(SQLITE_DB_PATH)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    try:
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def now() -> str:
@@ -246,7 +278,7 @@ def load_code_clauses(con: Any) -> int:
 
 def init_db() -> None:
     with get_db() as con:
-        if is_postgres():
+        if is_postgres(con):
             con.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS projects (
@@ -260,7 +292,8 @@ def init_db() -> None:
                   status TEXT NOT NULL, created_at TEXT NOT NULL,
                   sprinklered INTEGER NOT NULL DEFAULT 1,
                   page_index INTEGER NOT NULL DEFAULT 0,
-                  floor_name TEXT DEFAULT 'Architectural Floor Plan'
+                  floor_name TEXT DEFAULT 'Architectural Floor Plan',
+                  document_type TEXT NOT NULL DEFAULT 'architectural'
                 );
                 CREATE TABLE IF NOT EXISTS extracted_elements (
                   id TEXT PRIMARY KEY, drawing_id TEXT NOT NULL REFERENCES drawings(id) ON DELETE CASCADE, type TEXT NOT NULL,
@@ -292,6 +325,22 @@ def init_db() -> None:
                   file_bytes BYTEA NOT NULL,
                   created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS device_room_links (
+                  id TEXT PRIMARY KEY,
+                  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                  device_element_id TEXT NOT NULL REFERENCES extracted_elements(id) ON DELETE CASCADE,
+                  device_drawing_id TEXT NOT NULL REFERENCES drawings(id) ON DELETE CASCADE,
+                  device_tag TEXT,
+                  device_type TEXT NOT NULL,
+                  room_element_id TEXT REFERENCES extracted_elements(id) ON DELETE SET NULL,
+                  room_name TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  x_m REAL,
+                  y_m REAL,
+                  svg_x REAL,
+                  svg_y REAL,
+                  created_at TEXT NOT NULL
+                );
                 """
             )
         else:
@@ -308,7 +357,8 @@ def init_db() -> None:
                   status TEXT NOT NULL, created_at TEXT NOT NULL,
                   sprinklered INTEGER NOT NULL DEFAULT 1,
                   page_index INTEGER NOT NULL DEFAULT 0,
-                  floor_name TEXT DEFAULT 'Architectural Floor Plan'
+                  floor_name TEXT DEFAULT 'Architectural Floor Plan',
+                  document_type TEXT NOT NULL DEFAULT 'architectural'
                 );
                 CREATE TABLE IF NOT EXISTS extracted_elements (
                   id TEXT PRIMARY KEY, drawing_id TEXT NOT NULL REFERENCES drawings(id), type TEXT NOT NULL,
@@ -340,14 +390,67 @@ def init_db() -> None:
                   file_bytes BLOB NOT NULL,
                   created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS device_room_links (
+                  id TEXT PRIMARY KEY,
+                  project_id TEXT NOT NULL REFERENCES projects(id),
+                  device_element_id TEXT NOT NULL REFERENCES extracted_elements(id),
+                  device_drawing_id TEXT NOT NULL REFERENCES drawings(id),
+                  device_tag TEXT,
+                  device_type TEXT NOT NULL,
+                  room_element_id TEXT REFERENCES extracted_elements(id),
+                  room_name TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  x_m REAL,
+                  y_m REAL,
+                  svg_x REAL,
+                  svg_y REAL,
+                  created_at TEXT NOT NULL
+                );
                 """
             )
+
+        # Migration check: Ensure document_type exists on pre-existing drawings tables
+        try:
+            if is_postgres(con):
+                con.execute("ALTER TABLE drawings ADD COLUMN IF NOT EXISTS document_type TEXT NOT NULL DEFAULT 'architectural'")
+            else:
+                raw_cols = [c[1] for c in con.execute("PRAGMA table_info(drawings)").fetchall()]
+                if "document_type" not in raw_cols:
+                    con.execute("ALTER TABLE drawings ADD COLUMN document_type TEXT NOT NULL DEFAULT 'architectural'")
+        except Exception:
+            pass
+
+        # Migration check: Ensure device_room_links table exists
+        try:
+            con.execute("SELECT id FROM device_room_links LIMIT 1")
+        except Exception:
+            try:
+                con.execute("""
+                    CREATE TABLE IF NOT EXISTS device_room_links (
+                      id TEXT PRIMARY KEY,
+                      project_id TEXT NOT NULL,
+                      device_element_id TEXT NOT NULL,
+                      device_drawing_id TEXT NOT NULL,
+                      device_tag TEXT,
+                      device_type TEXT NOT NULL,
+                      room_element_id TEXT,
+                      room_name TEXT NOT NULL,
+                      status TEXT NOT NULL,
+                      x_m REAL,
+                      y_m REAL,
+                      svg_x REAL,
+                      svg_y REAL,
+                      created_at TEXT NOT NULL
+                    )
+                """)
+            except Exception:
+                pass
 
         load_code_clauses(con)
 
 
 def save_drawing_file(drawing_id: str, filename: str, file_type: str, file_bytes: bytes, con: Any) -> None:
-    if is_postgres():
+    if is_postgres(con):
         query = """
         INSERT INTO drawing_files (drawing_id, filename, file_type, file_bytes, created_at)
         VALUES (%s, %s, %s, %s, %s)

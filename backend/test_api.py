@@ -3,10 +3,12 @@ import json
 import os
 import sys
 from pathlib import Path
-from fastapi.testclient import TestClient
+
+os.environ["USE_LOCAL_SQLITE"] = "1"
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from fastapi.testclient import TestClient
 from app.main import app, init_database
 from app.dxf_parser import parse_dxf_file
 from app.occupant_load import calculate_occupant_loads

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   AlertTriangle,
@@ -106,9 +106,13 @@ function App() {
   const [uploadState, setUploadState] = useState('idle'); // 'idle' | 'uploading' | 'processing' | 'error'
   const [uploadError, setUploadError] = useState('');
   const [currentDrawingId, setCurrentDrawingId] = useState(DEMO_DRAWING_ID);
+  const [projectDrawings, setProjectDrawings] = useState([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null);
+  const [hoveredDevice, setHoveredDevice] = useState(null);
   const [drawingMeta, setDrawingMeta] = useState({
     name: 'Al Noor Business Centre',
     floor: 'Level 06 - Architectural CAD Overview',
+    documentType: 'architectural',
     occupancy: 'Business - Regular office areas',
     sprinklered: true,
     scale: '1:100',
@@ -202,6 +206,8 @@ function App() {
         const dData = await dRes.json();
         setDrawingMeta(prev => ({
           ...prev,
+          name: dData.name ? dData.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' ') : prev.name,
+          documentType: dData.document_type || prev.documentType || 'architectural',
           floor: dData.floor_name || prev.floor,
           fileType: (dData.file_type || '').toUpperCase(),
           hasImage: dData.has_image || false,
@@ -210,6 +216,9 @@ function App() {
           pages: dData.pages || prev.pages,
           imageTimestamp: Date.now()
         }));
+        if (dData.project_id) {
+          fetchProjectDrawings(dData.project_id);
+        }
         if (dData.multi_floor_summary) {
           setMultiFloorSummary(dData.multi_floor_summary);
           // Cache all floors
@@ -250,6 +259,105 @@ function App() {
       setDrawingMeta(prev => ({ ...prev, ...customMeta, imageTimestamp: Date.now() }));
     }
   };
+
+  const fetchProjectDrawings = async (projId = DEMO_PROJECT_ID) => {
+    if (!projId) return;
+    try {
+      const res = await fetch(`${API_URL}/projects/${projId}/drawings`);
+      if (res.ok) {
+        const data = await res.json();
+        setProjectDrawings(Array.isArray(data) ? data : (data.drawings || []));
+      }
+    } catch (err) {
+      console.warn('Project drawings fetch error:', err);
+    }
+  };
+
+  const formatFloorTabTitle = (d) => {
+    const isFa = d.document_type === 'fire_alarm';
+    const raw = (d.floor_name || d.name || '').trim();
+    
+    if (isFa) {
+      if (raw && !raw.toLowerCase().includes('architectural')) {
+        const cleanRaw = raw
+          .replace(/Dubai Commercial Floor\s*/i, '')
+          .replace(/Dubai Level\s*/i, 'Level ')
+          .replace(/Dubai\s*/i, '');
+        return `🚨 ${cleanRaw}`;
+      }
+      return '🚨 Fire Alarm Plan';
+    }
+
+    if (!raw || raw === 'Architectural Floor Plan') {
+      return `📐 Floor Plan (${d.file_type ? d.file_type.toUpperCase() : 'CAD'})`;
+    }
+
+    let clean = raw
+      .replace(/^Dubai Commercial Floor\s*/i, '')
+      .replace(/^Commercial Floor\s*/i, '')
+      .replace(/^Dubai\s*/i, '')
+      .replace(/^Level\s*0*/i, 'Level ');
+
+    if (/Level\s*0*0\b|Ground/i.test(clean)) {
+      return 'Level 00 (Ground)';
+    }
+    if (/Level\s*0*1\b/i.test(clean)) {
+      if (/Typical/i.test(clean) || /Office/i.test(clean)) return 'Level 01 (Office)';
+      if (/Arch/i.test(clean)) return 'Level 01 (Arch)';
+      return 'Level 01';
+    }
+    if (/Level\s*0*2\b/i.test(clean)) {
+      if (/Layout/i.test(clean)) return 'Level 02 (Layout)';
+      return 'Level 02';
+    }
+    if (/Level\s*0*3\b/i.test(clean)) {
+      return 'Level 03';
+    }
+    if (/Level\s*0*4\b/i.test(clean)) {
+      if (/Executive/i.test(clean)) return 'Level 04 (Executive)';
+      return 'Level 04';
+    }
+    if (/Level\s*0*5\b/i.test(clean)) {
+      return 'Level 05 (Non-Compliant)';
+    }
+    if (/Level\s*0*6\b/i.test(clean)) {
+      return 'Level 06 (Demo)';
+    }
+    return clean.length > 22 ? clean.substring(0, 20) + '…' : clean;
+  };
+
+  const validProjectDrawings = useMemo(() => {
+    const list = (projectDrawings || []).filter(d => 
+      d.status === 'ready' && 
+      !((d.floor_name || d.name || '').toLowerCase().includes('corrupt'))
+    );
+    // Sort floors logically: Ground (00), 01, 02, 03, 04, 05, 06, then Fire Alarm
+    const getFloorWeight = (d) => {
+      if (d.document_type === 'fire_alarm') return 999;
+      const str = (d.floor_name || d.name || '').toLowerCase();
+      if (str.includes('ground') || str.includes('level 00')) return 0;
+      const match = str.match(/level\s*0*(\d+)/i);
+      if (match) return parseInt(match[1], 10);
+      return 100;
+    };
+    list.sort((a, b) => getFloorWeight(a) - getFloorWeight(b));
+
+    // Deduplicate by formatted floor title so identical runs don't show duplicates
+    const deduped = [];
+    const seen = new Set();
+    for (const d of list) {
+      const key = `${d.document_type}_${formatFloorTabTitle(d)}_${d.file_type || ''}`;
+      if (!seen.has(key) || d.id === currentDrawingId) {
+        seen.add(key);
+        deduped.push(d);
+      }
+    }
+    return deduped;
+  }, [projectDrawings, currentDrawingId]);
+
+  useEffect(() => {
+    fetchProjectDrawings(DEMO_PROJECT_ID);
+  }, []);
 
   useEffect(() => {
     loadDrawingData(currentDrawingId);
@@ -332,9 +440,11 @@ function App() {
 
     const occType = config.occupancyType || 'Business - Regular office areas';
     const isSprinklered = config.sprinklered !== undefined ? config.sprinklered : true;
+    const docType = config.documentType || 'architectural';
 
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('document_type', docType);
     formData.append('occupancy_type', occType);
     formData.append('sprinklered', isSprinklered ? 'true' : 'false');
     formData.append('scale', '100');
@@ -371,6 +481,7 @@ function App() {
       await loadDrawingData(newDrawingId, {
         name: file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' '),
         floor: data.floor_name || file.name.replace('.dxf', '').replace('.pdf', '').replace(/_/g, ' '),
+        documentType: data.document_type || docType,
         occupancy: occType,
         sprinklered: isSprinklered,
         scale: '1:100',
@@ -379,14 +490,20 @@ function App() {
         hasImage: data.has_image || file.name.toLowerCase().endsWith('.pdf'),
         pageIndex: data.page_index || 0,
         pagesCount: data.pages_count || 1,
-        pages: data.pages || [{ index: 0, title: data.floor_name || 'Architectural Floor Plan' }],
+        pages: data.pages || [{ index: 0, title: data.floor_name || (docType === 'fire_alarm' ? 'Fire Alarm Shop Drawing' : 'Architectural Floor Plan') }],
         imageTimestamp: Date.now()
       });
+
+      fetchProjectDrawings(DEMO_PROJECT_ID);
 
       setUploadState('idle');
       setShowUploadModal(false);
       setScreen('review');
-      notify(`Drawing "${file.name}" analyzed (${isSprinklered ? 'Sprinklered' : 'Non-Sprinklered'}): floor overview ready.`);
+      notify(
+        docType === 'fire_alarm'
+          ? `Fire Alarm drawing "${file.name}" ingested: detected devices ready.`
+          : `Drawing "${file.name}" analyzed (${isSprinklered ? 'Sprinklered' : 'Non-Sprinklered'}): floor overview ready.`
+      );
     } catch (error) {
       console.error('File upload error:', error);
       setUploadState('error');
@@ -654,30 +771,68 @@ function App() {
           </button>
 
           <div className="project-mini">
-            <span className="eyebrow">ACTIVE DRAWING</span>
-            <h2>{drawingMeta.name}</h2>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <span className="eyebrow" style={{ margin: 0 }}>ACTIVE DRAWING</span>
+              <span style={{
+                fontSize: '9.5px',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                letterSpacing: '0.04em',
+                background: drawingMeta.documentType === 'fire_alarm' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                color: drawingMeta.documentType === 'fire_alarm' ? '#ef4444' : '#3b82f6',
+                border: drawingMeta.documentType === 'fire_alarm' ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(59, 130, 246, 0.3)'
+              }}>
+                {drawingMeta.documentType === 'fire_alarm' ? '🚨 Fire Alarm Shop Drawing' : '📐 Architectural Floor Plan'}
+              </span>
+            </div>
+            <h2>{drawingMeta.floor || drawingMeta.name}</h2>
             <p className="sub-loc">Dubai, UAE • {drawingMeta.scale}</p>
           </div>
 
           <div className="sidebar-stats-grid">
-            <div className="sb-stat-card">
-              <span className="sb-lbl">FLOOR AREA</span>
-              <b>{totalFloorArea > 0 ? `${totalFloorArea} m²` : '427 m²'}</b>
-            </div>
-            <div className="sb-stat-card">
-              <span className="sb-lbl">OCCUPANTS</span>
-              <b>{totalFloorOccupants > 0 ? `${totalFloorOccupants} p` : '227 p'}</b>
-            </div>
-            <div className="sb-stat-card">
-              <span className="sb-lbl">EXITS FOUND</span>
-              <b>{elements.filter(e => e.properties?.kind === 'exit' || e.properties?.kind === 'door').length || 2} doors</b>
-            </div>
-            <div className="sb-stat-card">
-              <span className="sb-lbl">STATUS</span>
-              <b className={items.length > 0 ? 'text-red' : 'text-green'}>
-                {items.length > 0 ? `${items.filter(x => x.status === 'open').length} Violations` : '✓ 100% Passed'}
-              </b>
-            </div>
+            {drawingMeta.documentType === 'fire_alarm' ? (
+              <>
+                <div className="sb-stat-card">
+                  <span className="sb-lbl">DEVICES</span>
+                  <b>{elements.filter(e => e.type === 'fire_alarm_device' || ['smoke_detector', 'heat_detector', 'manual_call_point', 'sounder', 'fire_alarm_panel'].includes(e.type)).length} units</b>
+                </div>
+                <div className="sb-stat-card">
+                  <span className="sb-lbl">DETECTORS</span>
+                  <b>{elements.filter(e => e.type === 'smoke_detector' || e.type === 'heat_detector' || e.properties?.device_type === 'smoke_detector' || e.properties?.device_type === 'heat_detector').length} units</b>
+                </div>
+                <div className="sb-stat-card">
+                  <span className="sb-lbl">MANUAL CALL</span>
+                  <b>{elements.filter(e => e.type === 'manual_call_point' || e.properties?.device_type === 'manual_call_point').length} MCPs</b>
+                </div>
+                <div className="sb-stat-card">
+                  <span className="sb-lbl">INGESTION</span>
+                  <b className="text-green">✓ Extracted</b>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="sb-stat-card">
+                  <span className="sb-lbl">FLOOR AREA</span>
+                  <b>{totalFloorArea > 0 ? `${totalFloorArea} m²` : '427 m²'}</b>
+                </div>
+                <div className="sb-stat-card">
+                  <span className="sb-lbl">OCCUPANTS</span>
+                  <b>{totalFloorOccupants > 0 ? `${totalFloorOccupants} p` : '227 p'}</b>
+                </div>
+                <div className="sb-stat-card">
+                  <span className="sb-lbl">EXITS FOUND</span>
+                  <b>{elements.filter(e => e.properties?.kind === 'exit' || e.properties?.kind === 'door').length || 2} doors</b>
+                </div>
+                <div className="sb-stat-card">
+                  <span className="sb-lbl">STATUS</span>
+                  <b className={items.length > 0 ? 'text-red' : 'text-green'}>
+                    {items.length > 0 ? `${items.filter(x => x.status === 'open').length} Violations` : '✓ 100% Passed'}
+                  </b>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="side-block">
@@ -708,33 +863,116 @@ function App() {
         <main className={`viewer ${mobileTab === 'plan' ? 'mobile-active' : ''}`}>
           {/* SINGLE UNIFIED TOP CONTROL BAR */}
           <div className="unified-top-bar">
-            {/* Floor switcher pills */}
-            <div className="floor-tabs-unified">
-              {(multiFloorSummary?.floors || drawingMeta.pages || [{ index: 0, title: 'Ground Floor' }, { index: 1, title: 'Level 01' }]).map((p) => {
-                const isActive = p.index === drawingMeta.pageIndex;
-                let cleanTitle = (p.title || `Level 0${p.index}`);
-                if (cleanTitle.toLowerCase().includes('ground') || p.index === 0) {
-                  cleanTitle = 'Level 00 (Ground)';
-                } else {
-                  cleanTitle = `Level 0${p.index}`;
-                }
-                const errCount = p.violations_count !== undefined ? p.violations_count : (p.violations ? p.violations.length : undefined);
-                return (
-                  <button
-                    key={`floor-tab-${p.index}`}
-                    className={`floor-btn ${isActive ? 'active' : ''}`}
-                    onClick={() => handleFloorSwitch(p.index)}
-                  >
-                    <span>{cleanTitle}</span>
-                    {errCount !== undefined && (
-                      <span className={`err-pill ${errCount > 0 ? 'err' : 'ok'}`}>
-                        {errCount > 0 ? `${errCount} ⚠️` : '✓'}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+            {/* Project Floor & Drawing Tabs */}
+            {validProjectDrawings && validProjectDrawings.length > 1 ? (
+              <div
+                className="floor-tabs-unified"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  overflowX: 'auto',
+                  flex: 1,
+                  minWidth: 0,
+                  paddingRight: '10px',
+                  scrollbarWidth: 'none'
+                }}
+              >
+                <span style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800, whiteSpace: 'nowrap', marginRight: '4px' }}>
+                  Floors:
+                </span>
+                {validProjectDrawings.map((d) => {
+                  const isCur = d.id === currentDrawingId;
+                  const isFa = d.document_type === 'fire_alarm';
+                  const title = formatFloorTabTitle(d);
+                  const errCount = d.violations_count !== undefined ? d.violations_count : 0;
+                  return (
+                    <button
+                      key={`proj-drw-${d.id}`}
+                      className={`floor-btn ${isCur ? 'active' : ''}`}
+                      onClick={() => {
+                        if (!isCur) {
+                          setCurrentDrawingId(d.id);
+                          notify(`Switched to ${title}`);
+                        }
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '5px 12px',
+                        borderRadius: '20px',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        transition: 'all 0.15s ease',
+                        border: isCur
+                          ? (isFa ? '1px solid #ef4444' : '1px solid #dc2626')
+                          : '1px solid rgba(0,0,0,0.1)',
+                        background: isCur
+                          ? (isFa ? '#ef4444' : '#dc2626')
+                          : 'var(--bg-muted, #f1f5f9)',
+                        color: isCur ? '#ffffff' : 'var(--ink-secondary, #475569)'
+                      }}
+                      title={`${d.floor_name || d.name || title} (${d.elements_count || 0} elements)`}
+                    >
+                      <span>{title}</span>
+                      {isFa ? (
+                        <span style={{
+                          fontSize: '9px',
+                          fontWeight: 800,
+                          padding: '1px 5px',
+                          borderRadius: '8px',
+                          background: isCur ? 'rgba(0,0,0,0.25)' : 'rgba(239, 68, 68, 0.15)',
+                          color: isCur ? '#ffffff' : '#ef4444'
+                        }}>
+                          {d.elements_count || 0} dev
+                        </span>
+                      ) : (
+                        <span
+                          className={`err-pill ${errCount > 0 ? 'err' : 'ok'}`}
+                          style={isCur ? { background: 'rgba(0,0,0,0.25)', color: '#ffffff' } : {}}
+                        >
+                          {errCount > 0 ? `${errCount} ⚠️` : '✓'}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Fallback for single drawing with multi-page PDF floors */
+              multiFloorSummary?.floors && multiFloorSummary.floors.length > 1 ? (
+                <div className="floor-tabs-unified" style={{ display: 'flex', alignItems: 'center', gap: '6px', overflowX: 'auto', flex: 1, minWidth: 0, paddingRight: '10px' }}>
+                  <span style={{ fontSize: '10px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800, whiteSpace: 'nowrap', marginRight: '4px' }}>
+                    Floors:
+                  </span>
+                  {multiFloorSummary.floors.map((p) => {
+                    const isActive = p.index === drawingMeta.pageIndex;
+                    let cleanTitle = p.title || `Level 0${p.index}`;
+                    if (cleanTitle.toLowerCase().includes('ground') || p.index === 0) {
+                      cleanTitle = 'Level 00 (Ground)';
+                    } else if (!cleanTitle.toLowerCase().includes('level')) {
+                      cleanTitle = `Level 0${p.index}`;
+                    }
+                    const errCount = p.violations_count !== undefined ? p.violations_count : (p.violations ? p.violations.length : 0);
+                    return (
+                      <button
+                        key={`floor-tab-${p.index}`}
+                        className={`floor-btn ${isActive ? 'active' : ''}`}
+                        onClick={() => handleFloorSwitch(p.index)}
+                      >
+                        <span>{cleanTitle}</span>
+                        <span className={`err-pill ${errCount > 0 ? 'err' : 'ok'}`}>
+                          {errCount > 0 ? `${errCount} ⚠️` : '✓'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null
+            )}
 
             {/* View mode & actions */}
             <div className="top-actions">
@@ -803,76 +1041,191 @@ function App() {
                 isFullScreen={isFullScreen}
                 setIsFullScreen={setIsFullScreen}
                 handleFloorSwitch={handleFloorSwitch}
+                selectedDeviceId={selectedDeviceId}
+                setSelectedDeviceId={setSelectedDeviceId}
+                hoveredDevice={hoveredDevice}
+                setHoveredDevice={setHoveredDevice}
               />
             </section>
 
             <aside className={`findings ${mobileTab === 'findings' ? 'mobile-active' : ''}`}>
-              <div className="find-head">
-                <div>
-                  <h2>Safety Findings <span className="count-badge">{items.filter(x => x.status === 'open').length} open</span></h2>
-                  <p>Click any card or floor pin to inspect.</p>
-                </div>
-              </div>
-
-              <div className="finding-list">
-                {violationsLoading && (
-                  <div className="loading-state">
-                    <div className="spinner"></div>
-                    <p>Analyzing floor plan...</p>
+              {drawingMeta.documentType === 'fire_alarm' ? (
+                <div className="fire-alarm-sidebar-wrap" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  <div className="find-head">
+                    <div>
+                      <h2>Fire Alarm Devices <span className="count-badge" style={{ background: '#ef4444' }}>{elements.filter(e => e.type === 'fire_alarm_device' || ['smoke_detector', 'heat_detector', 'manual_call_point', 'sounder', 'fire_alarm_panel'].includes(e.type)).length} detected</span></h2>
+                      <p>DXF point symbol extraction & coordinates</p>
+                    </div>
                   </div>
-                )}
-                {violationsError && !violationsLoading && (
-                  <div className="error-state">
-                    <AlertTriangle size={20} />
-                    <p><strong>Notice</strong>: {violationsError}</p>
+
+                  {/* Scope Boundary Notice */}
+                  <div style={{ margin: '10px 14px', padding: '10px 12px', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.25)', borderRadius: '6px', fontSize: '11px', color: '#93c5fd' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, marginBottom: '3px' }}>
+                      <CheckCircle2 size={13} style={{ color: '#60a5fa' }} />
+                      <span>Phase 1 Ingestion: Symbol Extraction Only</span>
+                    </div>
+                    <span style={{ opacity: 0.88, lineHeight: 1.4, display: 'block' }}>
+                      Coordinates and tags extracted from CAD layers. Rule evaluation and cross-document linking will be performed in subsequent phase.
+                    </span>
                   </div>
-                )}
-                {!violationsLoading && items.length === 0 && (
-                  <div className="empty-state">
-                    <CheckCircle2 size={28} />
-                    <p>100% Compliant</p>
-                    <small>All travel distances & exit capacities on this floor satisfy UAE Fire & Life Safety Code requirements.</small>
-                  </div>
-                )}
-                {!violationsLoading && items.map((f, idx) => {
-                  const isSelected = f.id === selected;
-                  const isDone = f.status !== 'open';
-                  return (
-                    <div
-                      key={f.id}
-                      onClick={() => setSelected(isSelected ? null : f.id)}
-                      className={`finding-card ${isSelected ? 'selected' : ''} ${isDone ? 'done' : ''}`}
-                    >
-                      <div className="fc-top-row">
-                        <div className="fc-pin-num">{idx + 1}</div>
-                        <div className="fc-room-title">
-                          <b>{f.roomName}</b>
-                          <span className="fc-kind">{f.kind || 'Travel Distance'}</span>
-                        </div>
-                        <span className={`fc-sev-tag ${f.severity?.toLowerCase()}`}>{f.severity}</span>
-                      </div>
 
-                      <p className="fc-desc">{f.shortTitle || f.title}</p>
-
-                      <div className="fc-compare-box">
-                        <div className="fc-c-item">
-                          <small>MEASURED</small>
-                          <b className="val-danger">{f.measured}</b>
-                        </div>
-                        <div className="fc-c-item">
-                          <small>UAE CODE LIMIT</small>
-                          <b className="val-safe">{f.limit}</b>
-                        </div>
-                      </div>
-
-                      <div className="fc-bottom-row">
-                        <span className="fc-clause-chip">{f.clause}</span>
-                        <span className="fc-inspect-link">Inspect Clause ↗</span>
+                  {/* Device Type Summary Pills */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px', padding: '0 14px 10px 14px' }}>
+                    <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '6px', padding: '7px 9px' }}>
+                      <span style={{ fontSize: '9.5px', color: '#fca5a5', textTransform: 'uppercase', fontWeight: 700 }}>Smoke Detectors</span>
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: '#ef4444', marginTop: '2px' }}>
+                        {elements.filter(e => e.type === 'smoke_detector' || e.properties?.device_type === 'smoke_detector').length} units
                       </div>
                     </div>
-                  );
-                })}
-              </div>
+                    <div style={{ background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.25)', borderRadius: '6px', padding: '7px 9px' }}>
+                      <span style={{ fontSize: '9.5px', color: '#fde68a', textTransform: 'uppercase', fontWeight: 700 }}>Heat Detectors</span>
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: '#f59e0b', marginTop: '2px' }}>
+                        {elements.filter(e => e.type === 'heat_detector' || e.properties?.device_type === 'heat_detector').length} units
+                      </div>
+                    </div>
+                    <div style={{ background: 'rgba(220, 38, 38, 0.12)', border: '1px solid rgba(220, 38, 38, 0.25)', borderRadius: '6px', padding: '7px 9px' }}>
+                      <span style={{ fontSize: '9.5px', color: '#fca5a5', textTransform: 'uppercase', fontWeight: 700 }}>Manual Call Points</span>
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: '#dc2626', marginTop: '2px' }}>
+                        {elements.filter(e => e.type === 'manual_call_point' || e.properties?.device_type === 'manual_call_point').length} MCPs
+                      </div>
+                    </div>
+                    <div style={{ background: 'rgba(139, 92, 246, 0.12)', border: '1px solid rgba(139, 92, 246, 0.25)', borderRadius: '6px', padding: '7px 9px' }}>
+                      <span style={{ fontSize: '9.5px', color: '#c4b5fd', textTransform: 'uppercase', fontWeight: 700 }}>Sounders & Panel</span>
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: '#a78bfa', marginTop: '2px' }}>
+                        {elements.filter(e => ['sounder', 'fire_alarm_panel'].includes(e.type) || ['sounder_beacon', 'fire_alarm_control_panel'].includes(e.properties?.device_type)).length} units
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Device List */}
+                  <div className="finding-list" style={{ flex: 1, overflowY: 'auto' }}>
+                    {elementsLoading && (
+                      <div className="loading-state">
+                        <div className="spinner"></div>
+                        <p>Extracting point symbols...</p>
+                      </div>
+                    )}
+                    {!elementsLoading && elements.filter(e => e.type === 'fire_alarm_device' || ['smoke_detector', 'heat_detector', 'manual_call_point', 'sounder', 'fire_alarm_panel'].includes(e.type)).map((dev, idx) => {
+                      const p = dev.properties || {};
+                      const isChosen = selectedDeviceId === dev.id;
+                      const devType = p.device_type || dev.type;
+                      return (
+                        <div
+                          key={dev.id || idx}
+                          onClick={() => setSelectedDeviceId(isChosen ? null : dev.id)}
+                          className={`finding-card ${isChosen ? 'selected' : ''}`}
+                          style={{ cursor: 'pointer', borderLeft: isChosen ? '3px solid #ef4444' : '3px solid transparent' }}
+                        >
+                          <div className="fc-top-row">
+                            <div className="fc-pin-num" style={{ background: devType.includes('smoke') ? '#ef4444' : devType.includes('heat') ? '#f59e0b' : devType.includes('mcp') || devType.includes('manual') ? '#dc2626' : '#8b5cf6' }}>
+                              {idx + 1}
+                            </div>
+                            <div className="fc-room-title">
+                              <b>{p.tag || `${devType.replace(/_/g, ' ')} #${idx + 1}`}</b>
+                              <span className="fc-kind" style={{ textTransform: 'capitalize' }}>{devType.replace(/_/g, ' ')}</span>
+                            </div>
+                            <span className="fc-sev-tag" style={{ background: 'rgba(255,255,255,0.08)', color: '#94a3b8' }}>{p.layer || 'FA-LAYER'}</span>
+                          </div>
+
+                          <div className="fc-compare-box" style={{ marginTop: '8px' }}>
+                            <div className="fc-c-item">
+                              <small>PHYSICAL COORD (X, Y)</small>
+                              <b style={{ fontFamily: 'monospace', color: '#38bdf8' }}>
+                                {p.x_m !== undefined ? `${p.x_m}m, ${p.y_m}m` : (p.pos_m ? `${p.pos_m[0]}m, ${p.pos_m[1]}m` : 'N/A')}
+                              </b>
+                            </div>
+                            <div className="fc-c-item">
+                              <small>SVG NORM (X%, Y%)</small>
+                              <b style={{ fontFamily: 'monospace', color: '#a3e635' }}>
+                                {dev.geometry?.coordinates ? `${dev.geometry.coordinates[0]}%, ${dev.geometry.coordinates[1]}%` : 'N/A'}
+                              </b>
+                            </div>
+                          </div>
+
+                          {/* Phase 2b: Cross-Document Linked Room Tag */}
+                          <div style={{ marginTop: '8px', padding: '5px 8px', borderRadius: '4px', background: p.linked_room_name && !p.linked_room_name.includes('corridor') ? 'rgba(34, 197, 94, 0.12)' : 'rgba(148, 163, 184, 0.12)', border: p.linked_room_name && !p.linked_room_name.includes('corridor') ? '1px solid rgba(34, 197, 94, 0.3)' : '1px solid rgba(148, 163, 184, 0.25)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px' }}>
+                            <span style={{ color: p.linked_room_name && !p.linked_room_name.includes('corridor') ? '#86efac' : '#cbd5e1', fontWeight: 700 }}>
+                              {p.linked_room_name ? (p.linked_room_name.includes('corridor') ? '🚪 unassigned - corridor' : '📍 ' + p.linked_room_name) : '⏳ Linking...'}
+                            </span>
+                            <span style={{ fontSize: '10px', textTransform: 'uppercase', opacity: 0.85, color: p.linked_room_name && !p.linked_room_name.includes('corridor') ? '#22c55e' : '#94a3b8' }}>
+                              {p.linking_status === 'assigned_room' ? 'Room Linked' : 'Circulation'}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="find-head">
+                    <div>
+                      <h2>Safety Findings <span className="count-badge">{items.filter(x => x.status === 'open').length} open</span></h2>
+                      <p>Click any card or floor pin to inspect.</p>
+                    </div>
+                  </div>
+
+                  <div className="finding-list">
+                    {violationsLoading && (
+                      <div className="loading-state">
+                        <div className="spinner"></div>
+                        <p>Analyzing floor plan...</p>
+                      </div>
+                    )}
+                    {violationsError && !violationsLoading && (
+                      <div className="error-state">
+                        <AlertTriangle size={20} />
+                        <p><strong>Notice</strong>: {violationsError}</p>
+                      </div>
+                    )}
+                    {!violationsLoading && items.length === 0 && (
+                      <div className="empty-state">
+                        <CheckCircle2 size={28} />
+                        <p>100% Compliant</p>
+                        <small>All travel distances & exit capacities on this floor satisfy UAE Fire & Life Safety Code requirements.</small>
+                      </div>
+                    )}
+                    {!violationsLoading && items.map((f, idx) => {
+                      const isSelected = f.id === selected;
+                      const isDone = f.status !== 'open';
+                      return (
+                        <div
+                          key={f.id}
+                          onClick={() => setSelected(isSelected ? null : f.id)}
+                          className={`finding-card ${isSelected ? 'selected' : ''} ${isDone ? 'done' : ''}`}
+                        >
+                          <div className="fc-top-row">
+                            <div className="fc-pin-num">{idx + 1}</div>
+                            <div className="fc-room-title">
+                              <b>{f.roomName}</b>
+                              <span className="fc-kind">{f.kind || 'Travel Distance'}</span>
+                            </div>
+                            <span className={`fc-sev-tag ${f.severity?.toLowerCase()}`}>{f.severity}</span>
+                          </div>
+
+                          <p className="fc-desc">{f.shortTitle || f.title}</p>
+
+                          <div className="fc-compare-box">
+                            <div className="fc-c-item">
+                              <small>MEASURED</small>
+                              <b className="val-danger">{f.measured}</b>
+                            </div>
+                            <div className="fc-c-item">
+                              <small>UAE CODE LIMIT</small>
+                              <b className="val-safe">{f.limit}</b>
+                            </div>
+                          </div>
+
+                          <div className="fc-bottom-row">
+                            <span className="fc-clause-chip">{f.clause}</span>
+                            <span className="fc-inspect-link">Inspect Clause ↗</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </aside>
           </div>
         </main>
@@ -1093,7 +1446,11 @@ function FloorPlan({
   setViewMode,
   isFullScreen,
   setIsFullScreen,
-  handleFloorSwitch
+  handleFloorSwitch,
+  selectedDeviceId,
+  setSelectedDeviceId,
+  hoveredDevice,
+  setHoveredDevice
 }) {
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showPills, setShowPills] = useState(true);
@@ -1118,6 +1475,10 @@ function FloorPlan({
   const wallElements = isRealDrawing ? elements.filter(e => e.type === 'wall') : [];
   const doorElements = isRealDrawing ? elements.filter(e => e.type === 'door' && !e.properties?.is_exit) : [];
   const exitElements = isRealDrawing ? elements.filter(e => e.type === 'exit' || e.properties?.is_exit === true) : [];
+  const fireAlarmElements = isRealDrawing ? elements.filter(e => 
+    e.type === 'fire_alarm_device' || 
+    ['smoke_detector', 'heat_detector', 'manual_call_point', 'sounder', 'fire_alarm_panel'].includes(e.type)
+  ) : [];
 
   // Generate image source URL with active page and cache-busting timestamp
   const imageSrc = drawingMeta.hasImage
@@ -1748,6 +2109,166 @@ function FloorPlan({
                   </g>
                 );
               })}
+
+              {/* Fire Alarm CAD Point Symbols (Phase 1 Ingestion) */}
+              {fireAlarmElements.map((el, idx) => {
+                const geom = el.geometry;
+                const props = el.properties || {};
+                if (!geom || geom.type !== 'Point' || !Array.isArray(geom.coordinates)) return null;
+                const [fx, fy] = geom.coordinates;
+                const devType = props.device_type || el.type;
+                const tag = props.tag || '';
+                const isHovered = hoveredDevice && hoveredDevice.id === el.id;
+                const isSelected = selectedDeviceId === el.id;
+
+                if (devType === 'smoke_detector' || devType.includes('smoke')) {
+                  return (
+                    <g
+                      key={`fa-smoke-${el.id || idx}`}
+                      transform={`translate(${fx}, ${fy})`}
+                      className={`fa-device-symbol fa-smoke ${isSelected ? 'selected' : ''}`}
+                      style={{ cursor: 'pointer' }}
+                      onMouseEnter={() => setHoveredDevice(el)}
+                      onMouseLeave={() => setHoveredDevice(null)}
+                      onClick={() => setSelectedDeviceId(isSelected ? null : el.id)}
+                    >
+                      {(isHovered || isSelected) && (
+                        <circle cx="0" cy="0" r="4.2" fill="rgba(239, 68, 68, 0.16)" stroke="#ef4444" strokeWidth="0.25" strokeDasharray="0.6, 0.6" />
+                      )}
+                      <circle cx="0" cy="0" r="1.3" fill="#fee2e2" stroke={isSelected ? '#ffffff' : '#ef4444'} strokeWidth={isSelected ? '0.45' : '0.3'} />
+                      <circle cx="0" cy="0" r="0.45" fill="#dc2626" />
+                      <text
+                        x="0"
+                        y="2.3"
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill={isSelected ? '#ffffff' : '#fca5a5'}
+                        fontSize="0.75"
+                        fontWeight="800"
+                        fontFamily="'JetBrains Mono', monospace"
+                      >
+                        {tag || 'SD'}
+                      </text>
+                    </g>
+                  );
+                } else if (devType === 'heat_detector' || devType.includes('heat')) {
+                  return (
+                    <g
+                      key={`fa-heat-${el.id || idx}`}
+                      transform={`translate(${fx}, ${fy})`}
+                      className={`fa-device-symbol fa-heat ${isSelected ? 'selected' : ''}`}
+                      style={{ cursor: 'pointer' }}
+                      onMouseEnter={() => setHoveredDevice(el)}
+                      onMouseLeave={() => setHoveredDevice(null)}
+                      onClick={() => setSelectedDeviceId(isSelected ? null : el.id)}
+                    >
+                      {(isHovered || isSelected) && (
+                        <circle cx="0" cy="0" r="3.8" fill="rgba(245, 158, 11, 0.16)" stroke="#f59e0b" strokeWidth="0.25" strokeDasharray="0.6, 0.6" />
+                      )}
+                      <circle cx="0" cy="0" r="1.3" fill="#fef3c7" stroke={isSelected ? '#ffffff' : '#f59e0b'} strokeWidth={isSelected ? '0.45' : '0.3'} />
+                      <polygon points="0,-0.6 0.6,0.4 -0.6,0.4" fill="#d97706" />
+                      <text
+                        x="0"
+                        y="2.3"
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill={isSelected ? '#ffffff' : '#fde68a'}
+                        fontSize="0.75"
+                        fontWeight="800"
+                        fontFamily="'JetBrains Mono', monospace"
+                      >
+                        {tag || 'HD'}
+                      </text>
+                    </g>
+                  );
+                } else if (devType === 'manual_call_point' || devType.includes('mcp') || devType.includes('manual')) {
+                  return (
+                    <g
+                      key={`fa-mcp-${el.id || idx}`}
+                      transform={`translate(${fx}, ${fy})`}
+                      className={`fa-device-symbol fa-mcp ${isSelected ? 'selected' : ''}`}
+                      style={{ cursor: 'pointer' }}
+                      onMouseEnter={() => setHoveredDevice(el)}
+                      onMouseLeave={() => setHoveredDevice(null)}
+                      onClick={() => setSelectedDeviceId(isSelected ? null : el.id)}
+                    >
+                      {(isHovered || isSelected) && (
+                        <rect x="-2.2" y="-2.2" width="4.4" height="4.4" rx="0.5" fill="rgba(220, 38, 38, 0.18)" stroke="#ef4444" strokeWidth="0.25" strokeDasharray="0.6, 0.6" />
+                      )}
+                      <rect x="-1.2" y="-1.2" width="2.4" height="2.4" rx="0.3" fill="#b91c1c" stroke={isSelected ? '#ffffff' : '#fca5a5'} strokeWidth={isSelected ? '0.45' : '0.3'} />
+                      <circle cx="0" cy="0" r="0.45" fill="#ffffff" />
+                      <text
+                        x="0"
+                        y="2.3"
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill={isSelected ? '#ffffff' : '#f87171'}
+                        fontSize="0.75"
+                        fontWeight="800"
+                        fontFamily="'JetBrains Mono', monospace"
+                      >
+                        {tag || 'MCP'}
+                      </text>
+                    </g>
+                  );
+                } else if (devType === 'sounder' || devType === 'sounder_beacon' || devType.includes('sounder')) {
+                  return (
+                    <g
+                      key={`fa-sounder-${el.id || idx}`}
+                      transform={`translate(${fx}, ${fy})`}
+                      className={`fa-device-symbol fa-sounder ${isSelected ? 'selected' : ''}`}
+                      style={{ cursor: 'pointer' }}
+                      onMouseEnter={() => setHoveredDevice(el)}
+                      onMouseLeave={() => setHoveredDevice(null)}
+                      onClick={() => setSelectedDeviceId(isSelected ? null : el.id)}
+                    >
+                      {(isHovered || isSelected) && (
+                        <circle cx="0" cy="0" r="3.5" fill="rgba(139, 92, 246, 0.16)" stroke="#8b5cf6" strokeWidth="0.25" strokeDasharray="0.6, 0.6" />
+                      )}
+                      <polygon points="0,-1.3 1.3,0 0,1.3 -1.3,0" fill="#7c3aed" stroke={isSelected ? '#ffffff' : '#c4b5fd'} strokeWidth={isSelected ? '0.45' : '0.3'} />
+                      <text
+                        x="0"
+                        y="2.3"
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill={isSelected ? '#ffffff' : '#c4b5fd'}
+                        fontSize="0.75"
+                        fontWeight="800"
+                        fontFamily="'JetBrains Mono', monospace"
+                      >
+                        {tag || 'SB'}
+                      </text>
+                    </g>
+                  );
+                } else if (devType === 'fire_alarm_panel' || devType === 'fire_alarm_control_panel' || devType.includes('facp') || devType.includes('panel')) {
+                  return (
+                    <g
+                      key={`fa-panel-${el.id || idx}`}
+                      transform={`translate(${fx}, ${fy})`}
+                      className={`fa-device-symbol fa-facp ${isSelected ? 'selected' : ''}`}
+                      style={{ cursor: 'pointer' }}
+                      onMouseEnter={() => setHoveredDevice(el)}
+                      onMouseLeave={() => setHoveredDevice(null)}
+                      onClick={() => setSelectedDeviceId(isSelected ? null : el.id)}
+                    >
+                      <rect x="-3.0" y="-1.5" width="6.0" height="3.0" rx="0.5" fill="#991b1b" stroke={isSelected ? '#ffffff' : '#fecaca'} strokeWidth={isSelected ? '0.5' : '0.35'} />
+                      <text
+                        x="0"
+                        y="0.1"
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill="#ffffff"
+                        fontSize="0.9"
+                        fontWeight="800"
+                        fontFamily="'DM Mono', monospace"
+                      >
+                        FACP
+                      </text>
+                    </g>
+                  );
+                }
+                return null;
+              })}
             </g>
           )}
 
@@ -1853,6 +2374,32 @@ function FloorPlan({
               <span>{hoveredRoom.relatedFinding.shortTitle || hoveredRoom.relatedFinding.title}</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Fire Alarm Device Hover Tooltip */}
+      {hoveredDevice && (
+        <div
+          className="room-hover-tooltip"
+          style={{
+            left: Math.min(Math.max(10, mousePos.x + 15), 480),
+            top: Math.min(Math.max(10, mousePos.y - 45), 440),
+            borderColor: 'rgba(239, 68, 68, 0.4)'
+          }}
+        >
+          <div className="rht-head">
+            <b>{hoveredDevice.properties?.tag || hoveredDevice.type}</b>
+            <span className="rht-badge safe" style={{ background: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }}>
+              {hoveredDevice.properties?.device_type?.replace(/_/g, ' ') || hoveredDevice.type}
+            </span>
+          </div>
+          <div className="rht-body">
+            <span>Layer: <b>{hoveredDevice.properties?.layer || 'N/A'}</b></span>
+            <span>Physical: <b>{hoveredDevice.properties?.x_m !== undefined ? `${hoveredDevice.properties.x_m}m, ${hoveredDevice.properties.y_m}m` : (hoveredDevice.properties?.pos_m ? `${hoveredDevice.properties.pos_m[0]}m, ${hoveredDevice.properties.pos_m[1]}m` : 'N/A')}</b></span>
+            {hoveredDevice.geometry?.coordinates && (
+              <span>SVG Norm: <b>{hoveredDevice.geometry.coordinates[0]}%, {hoveredDevice.geometry.coordinates[1]}%</b></span>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -2024,6 +2571,7 @@ function UploadModal({ close, onFileSelected, uploadState, error, onFallbackDemo
   const [selectedFile, setSelectedFile] = useState(null);
   const [occupancyType, setOccupancyType] = useState('Business - Regular office areas');
   const [sprinklered, setSprinklered] = useState(true);
+  const [documentType, setDocumentType] = useState('architectural');
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -2043,7 +2591,7 @@ function UploadModal({ close, onFileSelected, uploadState, error, onFallbackDemo
 
   const handleSubmit = () => {
     if (selectedFile) {
-      onFileSelected(selectedFile, { occupancyType, sprinklered });
+      onFileSelected(selectedFile, { occupancyType, sprinklered, documentType });
     } else {
       document.querySelector('.drop input')?.click();
     }
@@ -2057,13 +2605,13 @@ function UploadModal({ close, onFileSelected, uploadState, error, onFallbackDemo
         <button className="close" onClick={close} disabled={isUploading} aria-label="Close modal">
           <X size={18} />
         </button>
-        <h2>Upload CAD / PDF Floor Plan</h2>
-        <p>Upload any DXF or PDF architectural floor plan to render real drawing geometry and run automated UAE Fire & Life Safety checks.</p>
+        <h2>Upload CAD / PDF Drawing</h2>
+        <p>Upload DXF architectural floor plans or fire alarm shop drawings to parse vector geometry and extracted point symbols.</p>
 
         {isUploading && (
           <div className="upload-status">
             <div className="spinner"></div>
-            <h3>Analyzing floor plan...</h3>
+            <h3>Analyzing drawing...</h3>
             <p>Extracting geometric elements, calculating travel distances, and verifying exit capacities.</p>
             <div className="upload-steps">
               <span className="step done"><CheckCircle2 size={13} /> File received</span>
@@ -2106,6 +2654,18 @@ function UploadModal({ close, onFileSelected, uploadState, error, onFallbackDemo
             </label>
 
             <div className="modal-fields">
+              <div className="modal-field" style={{ gridColumn: '1 / -1' }}>
+                <label>DRAWING DISCIPLINE / TYPE</label>
+                <select
+                  className="modal-select"
+                  value={documentType}
+                  onChange={(e) => setDocumentType(e.target.value)}
+                >
+                  <option value="architectural">📐 Architectural Floor Plan (Means of Egress)</option>
+                  <option value="fire_alarm">🚨 Fire Alarm Shop Drawing (Detection & MCP)</option>
+                </select>
+              </div>
+
               <div className="modal-field">
                 <label>OCCUPANCY CLASSIFICATION</label>
                 <select

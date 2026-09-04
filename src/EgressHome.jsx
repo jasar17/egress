@@ -67,6 +67,7 @@ export default function EgressHome({
 }) {
   const [dragOver, setDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [documentType, setDocumentType] = useState('architectural');
   const [occupancyType, setOccupancyType] = useState('Business - Regular office areas');
   const [sprinklered, setSprinklered] = useState(true);
   const [selectedCapability, setSelectedCapability] = useState(null);
@@ -75,7 +76,7 @@ export default function EgressHome({
     const file = e.target.files?.[0];
     if (file) {
       setSelectedFile(file);
-      onFileUpload(file, { occupancyType, sprinklered });
+      onFileUpload(file, { occupancyType, sprinklered, documentType });
       onNavigateToReview();
     }
   };
@@ -86,14 +87,14 @@ export default function EgressHome({
     const file = e.dataTransfer?.files?.[0];
     if (file) {
       setSelectedFile(file);
-      onFileUpload(file, { occupancyType, sprinklered });
+      onFileUpload(file, { occupancyType, sprinklered, documentType });
       onNavigateToReview();
     }
   };
 
   const handleStartAnalysis = () => {
     if (selectedFile) {
-      onFileUpload(selectedFile, { occupancyType, sprinklered });
+      onFileUpload(selectedFile, { occupancyType, sprinklered, documentType });
       onNavigateToReview();
     } else {
       document.querySelector('#upload-section input[type=file]')?.click();
@@ -375,6 +376,18 @@ export default function EgressHome({
                 )}
 
                 <div className="upload-config-grid">
+                  <div className="config-field-group">
+                    <label>DRAWING DISCIPLINE / TYPE</label>
+                    <select
+                      className="config-select-input"
+                      value={documentType}
+                      onChange={(e) => setDocumentType(e.target.value)}
+                    >
+                      <option value="architectural">📐 Architectural Floor Plan (Means of Egress)</option>
+                      <option value="fire_alarm">🚨 Fire Alarm Shop Drawing (Detection & MCP)</option>
+                    </select>
+                  </div>
+
                   <div className="config-field-group">
                     <label>OCCUPANCY CLASSIFICATION</label>
                     <select

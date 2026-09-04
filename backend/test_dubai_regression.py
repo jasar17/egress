@@ -6,13 +6,17 @@ across all storeys of the Dubai Commercial Building test set.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
-from fastapi.testclient import TestClient
+
+os.environ["USE_LOCAL_SQLITE"] = "1"
 
 backend_dir = Path(__file__).resolve().parent
 sys.path.insert(0, str(backend_dir))
+
+from fastapi.testclient import TestClient
 
 from app.main import app, init_database
 from app.dxf_parser import parse_dxf_file
@@ -305,6 +309,21 @@ def test_extended_code_clause_topics():
     assert door_flagged[0]["measured_value"] == 800.0
     assert door_flagged[0]["limit_value"] == 900.0
     print(f"[PASS] Topic 'exit_door_width' correctly flagged sub-standard clear door opening ({door_flagged[0]['measured_value']}mm < {door_flagged[0]['limit_value']}mm, clause UAE-FLS-3.1-DOOR-WIDTH-MIN)")
+
+    # Test 8: Assembly room 2-door requirement (UAE-FLS-3.17-ASSM-ROOM-AREA, Table 3.17, Page 302, 280 m2 limit)
+    large_assembly_drawing = {
+        "floor_name": "Diagnostic Assembly Hall Layout",
+        "rooms": [{"name": "COMMUNITY AUDITORIUM", "area_m2": 310.0, "occupant_load": 220, "travel_distance_m": 18.0, "centroid": [40, 40]}],
+        "exits": [{"name": "STAIR 1", "pos": [10, 50]}, {"name": "STAIR 2", "pos": [90, 50]}],
+        "summary": {"width_m": 42.0, "height_m": 24.0}
+    }
+    assm_vs = evaluate_fls_rules(large_assembly_drawing, con=con, drawing_id="test_assm", element_id_map={}, occupancy_type="Assembly")
+    assm_flagged = [v for v in assm_vs if v["clause_ref"] == "UAE-FLS-3.17-ASSM-ROOM-AREA"]
+    assert len(assm_flagged) == 1
+    assert assm_flagged[0]["measured_value"] == 310.0
+    assert assm_flagged[0]["limit_value"] == 280.0
+    assert "Table 3.17" in assm_flagged[0]["detail"]
+    print(f"[PASS] Topic 'two_exit_doors_required_by_area' (Assembly): correctly cited UAE-FLS-3.17-ASSM-ROOM-AREA ({assm_flagged[0]['measured_value']}m2 > {assm_flagged[0]['limit_value']}m2, Table 3.17)")
 
 
 if __name__ == "__main__":

@@ -8,7 +8,14 @@ from shapely.geometry import Point, Polygon
 from app.db import now
 
 
-def link_fire_alarm_devices_to_rooms(project_id: str, con: Any) -> list[dict[str, Any]]:
+import re
+
+def link_fire_alarm_devices_to_rooms(
+    project_id: str,
+    con: Any,
+    fa_drawing_id: str | None = None,
+    arch_drawing_id: str | None = None
+) -> list[dict[str, Any]]:
     """
     Cross-document entity linking:
     Connects fire alarm devices extracted from a fire_alarm shop drawing to room polygons
@@ -17,21 +24,60 @@ def link_fire_alarm_devices_to_rooms(project_id: str, con: Any) -> list[dict[str
     Corridor spaces without explicit room polygons are classified as 'unassigned - corridor'.
     Results are persisted to the device_room_links table and denormalized into extracted_elements properties.
     """
-    # 1. Fetch latest fire alarm drawing for this project
-    fa_drawing = con.execute(
-        "SELECT id FROM drawings WHERE project_id = ? AND document_type = 'fire_alarm' ORDER BY created_at DESC LIMIT 1",
-        (project_id,)
-    ).fetchone()
-    if not fa_drawing:
-        return []
+    # 1. Resolve fire alarm drawing
+    if not fa_drawing_id:
+        fa_drawing = con.execute(
+            "SELECT id, floor_name, file_url, file_type FROM drawings WHERE project_id = ? AND document_type = 'fire_alarm' ORDER BY created_at DESC LIMIT 1",
+            (project_id,)
+        ).fetchone()
+        if not fa_drawing:
+            return []
+        fa_drawing_id = fa_drawing["id"]
+    else:
+        fa_drawing = con.execute(
+            "SELECT id, floor_name, file_url, file_type FROM drawings WHERE id = ?",
+            (fa_drawing_id,)
+        ).fetchone()
+        if not fa_drawing:
+            return []
 
-    fa_drawing_id = fa_drawing["id"]
+    # 2. Resolve matching architectural drawing
+    if arch_drawing_id:
+        arch_drawing = con.execute(
+            "SELECT id, floor_name, file_url, file_type FROM drawings WHERE id = ?",
+            (arch_drawing_id,)
+        ).fetchone()
+    else:
+        # Intelligently match architectural drawing by floor/level name
+        fa_name = ((fa_drawing["floor_name"] or "") + " " + (fa_drawing["file_url"] or "")).lower()
+        candidates = con.execute(
+            "SELECT id, floor_name, file_url, file_type, created_at FROM drawings WHERE project_id = ? AND document_type = 'architectural'",
+            (project_id,)
+        ).fetchall()
+        if not candidates:
+            return []
 
-    # 2. Fetch latest architectural drawing for this project
-    arch_drawing = con.execute(
-        "SELECT id FROM drawings WHERE project_id = ? AND document_type = 'architectural' ORDER BY created_at DESC LIMIT 1",
-        (project_id,)
-    ).fetchone()
+        def score_candidate(cand: Any) -> int:
+            cand_name = ((cand["floor_name"] or "") + " " + (cand["file_url"] or "")).lower()
+            score = 0
+            # Level number matches (e.g. 'level 01', 'level 1', 'l01')
+            fa_levels = re.findall(r'(?:level|l)[_\s-]*0?(\d+)', fa_name)
+            for lvl in fa_levels:
+                if re.search(r'(?:level|l)[_\s-]*0?' + lvl + r'\b', cand_name):
+                    score += 10
+            # Keyword matches
+            if 'typical' in fa_name and 'typical' in cand_name:
+                score += 5
+            if 'ground' in fa_name and ('ground' in cand_name or 'level 00' in cand_name or 'level 0' in cand_name):
+                score += 10
+            if cand["file_type"] == fa_drawing["file_type"]:
+                score += 1
+            return score
+
+        scored = [(score_candidate(c), c) for c in candidates]
+        scored.sort(key=lambda x: (x[0], x[1]["created_at"]), reverse=True)
+        arch_drawing = scored[0][1]
+
     if not arch_drawing:
         return []
 

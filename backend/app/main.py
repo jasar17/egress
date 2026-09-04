@@ -213,7 +213,7 @@ def ensure_drawing_file(drawing_id: str, con: Any) -> tuple[Path | None, bytes |
 
 
 
-def process_upload(drawing_id: str, page_index: int | None = None) -> None:
+def process_upload(drawing_id: str, page_index: int | None = None, matching_drawing_id: str | None = None) -> None:
     """Process uploaded drawing: real parsing for DXF and PDF files, preserving seeded drawing as demo fixture."""
     with db() as con:
         drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
@@ -262,7 +262,12 @@ def process_upload(drawing_id: str, page_index: int | None = None) -> None:
                 con.execute("UPDATE drawings SET status = 'ready', floor_name = ?, page_index = 0 WHERE id = ?", (floor_name, drawing_id))
                 try:
                     from app.linking import link_fire_alarm_devices_to_rooms
-                    link_fire_alarm_devices_to_rooms(drawing["project_id"], con)
+                    link_fire_alarm_devices_to_rooms(
+                        drawing["project_id"],
+                        con,
+                        fa_drawing_id=drawing_id,
+                        arch_drawing_id=matching_drawing_id
+                    )
                 except Exception as link_err:
                     print(f"Notice: Cross-document auto-linking skipped: {link_err}")
             except Exception as e:
@@ -488,6 +493,35 @@ def get_drawing_device_links_endpoint(drawing_id: str) -> list[dict[str, Any]]:
         return [l for l in all_links if l["device_drawing_id"] == drawing_id]
 
 
+@app.post("/drawings/{fa_drawing_id}/link-to-architectural/{arch_drawing_id}")
+def link_fire_alarm_to_architectural(fa_drawing_id: str, arch_drawing_id: str) -> dict[str, Any]:
+    """Explicitly links a fire alarm shop drawing to a specific matching architectural floor plan."""
+    with db() as con:
+        fa_drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (fa_drawing_id,)).fetchone()
+        if not fa_drawing:
+            raise HTTPException(404, "Fire alarm drawing not found.")
+        arch_drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (arch_drawing_id,)).fetchone()
+        if not arch_drawing:
+            raise HTTPException(404, "Architectural drawing not found.")
+        from app.linking import link_fire_alarm_devices_to_rooms
+        links = link_fire_alarm_devices_to_rooms(
+            fa_drawing["project_id"],
+            con,
+            fa_drawing_id=fa_drawing_id,
+            arch_drawing_id=arch_drawing_id
+        )
+        return {
+            "status": "success",
+            "fa_drawing_id": fa_drawing_id,
+            "arch_drawing_id": arch_drawing_id,
+            "arch_floor_name": arch_drawing["floor_name"],
+            "total_devices": len(links),
+            "assigned_rooms_count": sum(1 for l in links if l["status"] == "assigned_room"),
+            "unassigned_corridor_count": sum(1 for l in links if l["status"] == "unassigned_corridor"),
+            "links": links
+        }
+
+
 @app.post("/projects/{project_id}/drawings", status_code=201)
 async def upload_drawing(
     project_id: str,
@@ -495,7 +529,8 @@ async def upload_drawing(
     document_type: str = Form("architectural"),
     occupancy_type: str = Form("Business - Regular office areas"),
     sprinklered: bool = Form(True),
-    scale: float = Form(100)
+    scale: float = Form(100),
+    matching_drawing_id: str | None = Form(None)
 ) -> dict[str, Any]:
     doc_type = (document_type or "architectural").strip().lower()
     if doc_type not in ("architectural", "fire_alarm"):
@@ -527,7 +562,7 @@ async def upload_drawing(
     invalidate_drawing_cache(drawing_id)
 
     # Process drawing geometry for page 0
-    process_upload(drawing_id, page_index=0)
+    process_upload(drawing_id, page_index=0, matching_drawing_id=matching_drawing_id)
     
     with db() as con:
         drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()

@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import './styles.css';
 import EgressHome from './EgressHome.jsx';
+import useSmoothScroll from './hooks/useSmoothScroll.js';
 
 const DEMO_FLAGS = [
   { id: 'V-042', kind: 'Travel distance', clause: 'UAE FLSC 3.16-BUS-TD-S', title: 'Travel distance exceeds maximum', detail: 'Open office - North zone', measured: '51.8 m', limit: '45.0 m', severity: 'Critical', pos: ['30%', '26%'], status: 'open' },
@@ -429,6 +430,7 @@ function FloorDropdownSelector({
 
 function App() {
   const [screen, setScreen] = useState('egress');
+  useSmoothScroll(screen === 'egress');
   const [selected, setSelected] = useState(null);
   const [items, setItems] = useState(DEMO_FLAGS);
   const [showUploadModal, setShowUploadModal] = useState(false);

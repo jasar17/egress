@@ -26,6 +26,18 @@ import {
 import heroDubaiArch from './assets/hero_dubai_arch.jpg';
 import egressStairArch from './assets/egress_stair_arch.jpg';
 import abstractDarkImg from './assets/abstract_dark_crimson.jpg';
+import HeroScene3D from './components/HeroScene3D.jsx';
+
+// Precision CAD Drafting Reticle
+export const CadCornerReticle = ({ position = 'tl' }) => (
+  <div className={`cad-corner-reticle ${position}`}>
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 12H20M12 4V20" strokeWidth="1" strokeOpacity="0.35" />
+      <circle cx="12" cy="12" r="3" strokeWidth="1" strokeOpacity="0.55" />
+      <path d="M3 7V3H7M17 3H21V7M21 17V21H17M7 21H3V17" strokeWidth="1.2" strokeOpacity="0.45" />
+    </svg>
+  </div>
+);
 
 // SVG Squiggly Wave Accent
 export const SquigglyWave = ({ color = '#1a1a1a', width = 54, height = 10, className = '' }) => (
@@ -71,6 +83,19 @@ export default function EgressHome({
   const [occupancyType, setOccupancyType] = useState('Business - Regular office areas');
   const [sprinklered, setSprinklered] = useState(true);
   const [selectedCapability, setSelectedCapability] = useState(null);
+
+  const scrollToSection = (target) => {
+    if (window.__lenis) {
+      window.__lenis.scrollTo(target, { offset: -30, duration: 1.15 });
+    } else {
+      if (typeof target === 'number') {
+        window.scrollTo({ top: target, behavior: 'smooth' });
+      } else {
+        const el = typeof target === 'string' ? document.querySelector(target) : target;
+        el?.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
+  };
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -156,29 +181,27 @@ export default function EgressHome({
 
   return (
     <div className="egress-app-wrapper">
-      {/* 1. HERO SECTION CONTAINER (Framed with premium blurred dark crimson background) */}
+      {/* 1. HERO SECTION CONTAINER (Pure 3D CAD Scene on Sleek Dark Gradient) */}
       <div className="egress-hero-outer-wrapper">
-        <div
-          className="egress-hero-bg-blur"
-          style={{ backgroundImage: `url(${abstractDarkImg})` }}
-        />
-        <div className="egress-hero-bg-overlay" />
+        <div className="egress-hero-spatial-grid" />
 
-        <div
-          className="egress-hero-floating-card"
-          style={{ backgroundImage: `url(${heroDubaiArch})` }}
-        >
-          <div className="hero-card-dark-overlay"></div>
+        <div className="egress-hero-floating-card">
+          {/* Live Procedural 3D CAD Wireframe Scene directly inside hero card */}
+          <div className="hero-3d-scene-container">
+            <HeroScene3D />
+          </div>
 
-          {/* Architectural CAD Corner Crosshairs */}
-          <div className="cad-corner tl">+</div>
-          <div className="cad-corner tr">+</div>
-          <div className="cad-corner bl">+</div>
-          <div className="cad-corner br">+</div>
+          <div className="hero-card-dark-overlay" />
+
+          {/* Precision Architectural CAD Reticles */}
+          <CadCornerReticle position="tl" />
+          <CadCornerReticle position="tr" />
+          <CadCornerReticle position="bl" />
+          <CadCornerReticle position="br" />
 
           {/* Top Nav inside Floating Card */}
           <div className="hero-card-nav">
-            <div className="hero-brand-block" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+            <div className="hero-brand-block" onClick={() => scrollToSection(0)}>
               <div className="hero-brand-text">
                 <div className="brand-lockup-main">
                   <span className="brand-word-bold">EGRESS</span>
@@ -190,19 +213,19 @@ export default function EgressHome({
             </div>
 
             <nav className="hero-nav-menu">
-              <button className="hero-nav-item" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+              <button className="hero-nav-item" onClick={() => scrollToSection(0)}>
                 Home
               </button>
-              <button className="hero-nav-item" onClick={() => document.getElementById('capabilities-section')?.scrollIntoView({ behavior: 'smooth' })}>
+              <button className="hero-nav-item" onClick={() => scrollToSection('#capabilities-section')}>
                 Capabilities
               </button>
-              <button className="hero-nav-item" onClick={() => document.getElementById('upload-section')?.scrollIntoView({ behavior: 'smooth' })}>
+              <button className="hero-nav-item" onClick={() => scrollToSection('#upload-section')}>
                 Upload Plan
               </button>
-              <button className="hero-nav-item" onClick={() => document.getElementById('about-section')?.scrollIntoView({ behavior: 'smooth' })}>
+              <button className="hero-nav-item" onClick={() => scrollToSection('#about-section')}>
                 Methodology
               </button>
-              <button className="hero-nav-item" onClick={() => document.getElementById('featured-audit')?.scrollIntoView({ behavior: 'smooth' })}>
+              <button className="hero-nav-item" onClick={() => scrollToSection('#featured-audit')}>
                 Case Audit
               </button>
             </nav>
@@ -226,46 +249,34 @@ export default function EgressHome({
             <div className="hero-center-actions">
               <button
                 className="btn-hero-tour primary-cta"
-                onClick={() => document.getElementById('upload-section')?.scrollIntoView({ behavior: 'smooth' })}
+                onClick={() => scrollToSection('#upload-section')}
               >
-                <FileUp size={16} /> Upload Floor Plan (.DXF / .PDF)
+                <FileUp size={16} /> <span>Upload Floor Plan (.DXF / .PDF)</span>
               </button>
               <button className="btn-hero-tour secondary-cta" onClick={handleQuickDemoClick}>
-                <Building2 size={16} /> Open Level 06 Case Audit →
+                <Building2 size={16} /> <span>Open Level 06 Case Audit</span> <ArrowRight size={15} className="btn-arrow-hover" />
               </button>
             </div>
           </div>
 
-          {/* Bottom Docked 3-Column Glass Bar (Architectural Specs) */}
-          <div className="hero-card-bottom-bar">
-            <div className="hero-bottom-col">
-              <div className="hero-bottom-col-title">
-                <ShieldCheck size={16} />
-                <span>168 Statutory Clauses</span>
-              </div>
-              <p className="hero-bottom-col-desc">
-                100% deterministic spatial checks against official UAE Fire & Life Safety Code requirements.
-              </p>
+          {/* Bottom Sleek Architectural Telemetry Strip (Very Short, Minimal, Single-Line) */}
+          <div className="hero-compact-telemetry-strip">
+            <div className="telemetry-pill-item">
+              <ShieldCheck size={14} className="telemetry-icon" />
+              <span className="telemetry-label">168 Statutory Clauses</span>
+              <span className="telemetry-tag">UAE FLSC</span>
             </div>
-
-            <div className="hero-bottom-col">
-              <div className="hero-bottom-col-title">
-                <UsersIcon />
-                <span>Architectural Geometry</span>
-              </div>
-              <p className="hero-bottom-col-desc">
-                Automated shortest-path walkability, exit unit widths, and dead-end corridor pockets.
-              </p>
+            <span className="telemetry-divider">/</span>
+            <div className="telemetry-pill-item">
+              <UsersIcon size={14} className="telemetry-icon" />
+              <span className="telemetry-label">Spatial Geometry Engine</span>
+              <span className="telemetry-tag">Shortest Path</span>
             </div>
-
-            <div className="hero-bottom-col">
-              <div className="hero-bottom-col-title">
-                <CheckCircle2 size={16} />
-                <span>Civil Defence Sign-off</span>
-              </div>
-              <p className="hero-bottom-col-desc">
-                Traceable clause citations and structured audit packages ready for authority submission.
-              </p>
+            <span className="telemetry-divider">/</span>
+            <div className="telemetry-pill-item">
+              <CheckCircle2 size={14} className="telemetry-icon" />
+              <span className="telemetry-label">Civil Defence Sign-off</span>
+              <span className="telemetry-tag">Audit Ready</span>
             </div>
           </div>
         </div>
@@ -284,19 +295,33 @@ export default function EgressHome({
             <SquigglyWave color="#991B1B" width={56} height={10} className="mt-wave" />
           </div>
 
-          {/* Right Column: 2x3 Grid */}
-          <div className="capabilities-right-grid">
+          {/* Right Column: Interactive Spotlight 2x3 Grid */}
+          <div
+            className="capabilities-right-grid"
+            onMouseMove={(e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              e.currentTarget.style.setProperty('--mouse-x', `${e.clientX - rect.left}px`);
+              e.currentTarget.style.setProperty('--mouse-y', `${e.clientY - rect.top}px`);
+            }}
+          >
             {capabilitiesData.map((cap) => (
               <div
                 key={cap.id}
                 className="capability-card-item"
+                onMouseMove={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  e.currentTarget.style.setProperty('--card-mouse-x', `${e.clientX - rect.left}px`);
+                  e.currentTarget.style.setProperty('--card-mouse-y', `${e.clientY - rect.top}px`);
+                }}
                 onClick={() => setSelectedCapability(cap)}
               >
+                <div className="capability-card-spotlight-overlay" />
                 <div className="capability-icon-circle">
                   {cap.icon}
                 </div>
                 <h3 className="capability-title-text">{cap.title}</h3>
                 <span className="capability-sub-clause">{cap.clause}</span>
+                <span className="capability-inspect-prompt">Inspect clause →</span>
               </div>
             ))}
           </div>
@@ -314,7 +339,7 @@ export default function EgressHome({
             </p>
           </div>
           <div className="promo-right-actions">
-            <button className="btn-promo-solid-white" onClick={() => document.getElementById('upload-section')?.scrollIntoView({ behavior: 'smooth' })}>
+            <button className="btn-promo-solid-white" onClick={() => scrollToSection('#upload-section')}>
               UPLOAD DRAWING
             </button>
             <button className="btn-promo-outline-white" onClick={handleQuickDemoClick}>
@@ -324,7 +349,7 @@ export default function EgressHome({
         </div>
 
         {/* Downward Caret Notch */}
-        <div className="promo-down-notch" onClick={() => document.getElementById('upload-section')?.scrollIntoView({ behavior: 'smooth' })}>
+        <div className="promo-down-notch" onClick={() => scrollToSection('#upload-section')}>
           <div className="notch-triangle"></div>
           <ChevronDown size={14} className="notch-arrow" />
         </div>
@@ -452,23 +477,22 @@ export default function EgressHome({
         </div>
       </section>
 
-      {/* 4. FEATURED AUDIT CASE STUDY (Architectural Egress Stairwell Backdrop) */}
+      {/* 4. FEATURED AUDIT CASE STUDY (Architectural Precision Card) */}
       <section
         id="featured-audit"
         className="egress-featured-audit-section"
-        style={{ backgroundImage: `url(${abstractDarkImg})` }}
       >
         <div className="featured-dark-overlay"></div>
         <div className="egress-container featured-content-wrap">
           <div className="featured-head-center">
-            <span className="about-eyebrow-chip" style={{ background: 'rgba(255,255,255,0.12)', color: '#FFFFFF' }}>
+            <span className="about-eyebrow-chip">
               CASE STUDY AUDIT
             </span>
-            <h2 className="featured-title-white">Featured Compliance Audit</h2>
-            <p className="featured-sub-white">
+            <h2 className="featured-title-dark">Featured Compliance Audit</h2>
+            <p className="featured-sub-dark">
               <em>Al Noor Business Centre</em> — Level 06 Commercial Office Floor Plan Compliance Analysis
             </p>
-            <SquigglyWave color="#FFFFFF" width={56} height={10} className="mx-auto-wave" />
+            <SquigglyWave color="#991B1B" width={56} height={10} className="mx-auto-wave" />
           </div>
 
           <div className="featured-case-card">

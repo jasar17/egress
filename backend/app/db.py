@@ -61,12 +61,6 @@ class PostgresCursorWrapper:
         self.cursor = raw_cursor
 
     def execute(self, query: str, params: Any = None):
-        # Convert SQLite '?' placeholders to Postgres '%s' or named :param to %(param)s
-        if params is not None:
-            if isinstance(params, dict):
-                query = re.sub(r':([a-zA-Z_][a-zA-Z0-9_]*)', r'%(\1)s', query)
-            else:
-                query = query.replace("?", "%s")
         # Handle SQLite 'INSERT OR REPLACE' in Postgres
         if "INSERT OR REPLACE INTO code_clauses" in query:
             query = """
@@ -135,6 +129,14 @@ class PostgresCursorWrapper:
                 svg_y = EXCLUDED.svg_y
             """
 
+        # Convert parameter placeholders from SQLite '?' to Postgres '%s'
+        if params is not None:
+            if isinstance(params, dict):
+                query = re.sub(r':([a-zA-Z_][a-zA-Z0-9_]*)', r'%(\1)s', query)
+            elif "?" in query:
+                # Escape existing literal '%' characters (e.g. LIKE 'pattern%') before converting '?' to '%s'
+                query = query.replace("%", "%%").replace("?", "%s")
+
         if params is not None:
             self.cursor.execute(query, params)
         else:
@@ -143,7 +145,8 @@ class PostgresCursorWrapper:
 
     def executemany(self, query: str, seq_of_params: Any):
         if seq_of_params:
-            query = query.replace("?", "%s")
+            if "?" in query:
+                query = query.replace("%", "%%").replace("?", "%s")
         self.cursor.executemany(query, seq_of_params)
         return self
 

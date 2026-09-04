@@ -780,6 +780,14 @@ function App() {
     formData.append('sprinklered', isSprinklered ? 'true' : 'false');
     formData.append('scale', '100');
 
+    if (docType === 'fire_alarm') {
+      const archId = config.architecturalDrawingId || config.matchingDrawingId;
+      if (archId) {
+        formData.append('architectural_drawing_id', archId);
+        formData.append('matching_drawing_id', archId);
+      }
+    }
+
     try {
       const response = await fetch(`${API_URL}/projects/${DEMO_PROJECT_ID}/drawings`, {
         method: 'POST',
@@ -981,6 +989,7 @@ function App() {
             uploadState={uploadState}
             error={uploadError}
             onFallbackDemo={handleDemoUploadFallback}
+            projectDrawings={projectDrawings}
           />
         )}
       </>
@@ -1081,6 +1090,7 @@ function App() {
             uploadState={uploadState}
             error={uploadError}
             onFallbackDemo={handleDemoUploadFallback}
+            projectDrawings={projectDrawings}
           />
         )}
         {toast && <div className="toast">{toast}</div>}
@@ -1584,6 +1594,7 @@ function App() {
           uploadState={uploadState}
           error={uploadError}
           onFallbackDemo={handleDemoUploadFallback}
+          projectDrawings={projectDrawings}
         />
       )}
       {showMultiFloorOverview && (
@@ -2803,12 +2814,23 @@ function FloorPlan({
 }
 
 
-function UploadModal({ close, onFileSelected, uploadState, error, onFallbackDemo }) {
+function UploadModal({ close, onFileSelected, uploadState, error, onFallbackDemo, projectDrawings = [] }) {
   const [dragOver, setDragOver] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [occupancyType, setOccupancyType] = useState('Business - Regular office areas');
   const [sprinklered, setSprinklered] = useState(true);
   const [documentType, setDocumentType] = useState('architectural');
+  const [architecturalDrawingId, setArchitecturalDrawingId] = useState('');
+
+  const archDrawings = (projectDrawings || []).filter(
+    (d) => !d.document_type || d.document_type === 'architectural'
+  );
+
+  useEffect(() => {
+    if (archDrawings.length > 0 && !architecturalDrawingId) {
+      setArchitecturalDrawingId(archDrawings[0].id);
+    }
+  }, [archDrawings, architecturalDrawingId]);
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -2828,7 +2850,16 @@ function UploadModal({ close, onFileSelected, uploadState, error, onFallbackDemo
 
   const handleSubmit = () => {
     if (selectedFile) {
-      onFileSelected(selectedFile, { occupancyType, sprinklered, documentType });
+      if (documentType === 'fire_alarm' && !architecturalDrawingId) {
+        alert('Please select a target architectural floor plan to link this fire alarm drawing against.');
+        return;
+      }
+      onFileSelected(selectedFile, {
+        occupancyType,
+        sprinklered,
+        documentType,
+        architecturalDrawingId
+      });
     } else {
       document.querySelector('.drop input')?.click();
     }
@@ -2902,6 +2933,31 @@ function UploadModal({ close, onFileSelected, uploadState, error, onFallbackDemo
                   <option value="fire_alarm">🚨 Fire Alarm Shop Drawing (Detection & MCP)</option>
                 </select>
               </div>
+
+              {documentType === 'fire_alarm' && (
+                <div className="modal-field" style={{ gridColumn: '1 / -1', background: 'var(--bg-secondary, #f8fafc)', border: '1px solid var(--border-color, #e2e8f0)', padding: '12px', borderRadius: 'var(--radius-sm, 6px)' }}>
+                  <label style={{ color: '#d97706', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>🎯 TARGET ARCHITECTURAL FLOOR PLAN</span>
+                    <span style={{ fontSize: '11px', background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px' }}>REQUIRED</span>
+                  </label>
+                  <select
+                    className="modal-select"
+                    value={architecturalDrawingId}
+                    onChange={(e) => setArchitecturalDrawingId(e.target.value)}
+                    required
+                  >
+                    <option value="">-- Select Matching Architectural Floor Plan --</option>
+                    {archDrawings.map((ad) => (
+                      <option key={ad.id} value={ad.id}>
+                        {ad.floor_name || ad.name || ad.id} ({ad.file_type ? ad.file_type.toUpperCase() : 'CAD'})
+                      </option>
+                    ))}
+                  </select>
+                  <p style={{ fontSize: '11px', color: 'var(--ink-secondary, #64748b)', margin: '6px 0 0' }}>
+                    Fire alarm devices will link explicitly to rooms in this architectural floor layout.
+                  </p>
+                </div>
+              )}
 
               <div className="modal-field">
                 <label>OCCUPANCY CLASSIFICATION</label>

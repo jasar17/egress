@@ -117,10 +117,11 @@ class PostgresCursorWrapper:
             query = """
             INSERT INTO device_room_links (
                 id, project_id, device_element_id, device_drawing_id, device_tag,
-                device_type, room_element_id, room_name, status, x_m, y_m, svg_x, svg_y, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                device_type, room_element_id, room_drawing_id, room_name, status, x_m, y_m, svg_x, svg_y, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 room_element_id = EXCLUDED.room_element_id,
+                room_drawing_id = EXCLUDED.room_drawing_id,
                 room_name = EXCLUDED.room_name,
                 status = EXCLUDED.status,
                 x_m = EXCLUDED.x_m,
@@ -336,6 +337,7 @@ def init_db() -> None:
                   device_tag TEXT,
                   device_type TEXT NOT NULL,
                   room_element_id TEXT REFERENCES extracted_elements(id) ON DELETE SET NULL,
+                  room_drawing_id TEXT REFERENCES drawings(id) ON DELETE SET NULL,
                   room_name TEXT NOT NULL,
                   status TEXT NOT NULL,
                   x_m REAL,
@@ -401,6 +403,7 @@ def init_db() -> None:
                   device_tag TEXT,
                   device_type TEXT NOT NULL,
                   room_element_id TEXT REFERENCES extracted_elements(id) ON DELETE SET NULL,
+                  room_drawing_id TEXT REFERENCES drawings(id) ON DELETE SET NULL,
                   room_name TEXT NOT NULL,
                   status TEXT NOT NULL,
                   x_m REAL,
@@ -437,6 +440,7 @@ def init_db() -> None:
                       device_tag TEXT,
                       device_type TEXT NOT NULL,
                       room_element_id TEXT,
+                      room_drawing_id TEXT,
                       room_name TEXT NOT NULL,
                       status TEXT NOT NULL,
                       x_m REAL,
@@ -448,6 +452,17 @@ def init_db() -> None:
                 """)
             except Exception:
                 pass
+
+        # Migration check: Ensure room_drawing_id column exists on device_room_links
+        try:
+            if is_postgres(con):
+                con.execute("ALTER TABLE device_room_links ADD COLUMN IF NOT EXISTS room_drawing_id TEXT REFERENCES drawings(id) ON DELETE SET NULL")
+            else:
+                raw_cols = [c[1] for c in con.execute("PRAGMA table_info(device_room_links)").fetchall()]
+                if "room_drawing_id" not in raw_cols:
+                    con.execute("ALTER TABLE device_room_links ADD COLUMN room_drawing_id TEXT REFERENCES drawings(id) ON DELETE SET NULL")
+        except Exception:
+            pass
 
         load_code_clauses(con)
 

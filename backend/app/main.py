@@ -260,19 +260,16 @@ def process_upload(drawing_id: str, page_index: int | None = None, matching_draw
                     )
 
                 con.execute("UPDATE drawings SET status = 'ready', floor_name = ?, page_index = 0 WHERE id = ?", (floor_name, drawing_id))
-                try:
-                    from app.linking import link_fire_alarm_devices_to_rooms
-                    link_fire_alarm_devices_to_rooms(
-                        drawing["project_id"],
-                        con,
-                        fa_drawing_id=drawing_id,
-                        arch_drawing_id=matching_drawing_id
-                    )
-                except Exception as link_err:
-                    print(f"Notice: Cross-document auto-linking skipped: {link_err}")
+                from app.linking import link_fire_alarm_devices_to_rooms
+                link_fire_alarm_devices_to_rooms(
+                    drawing["project_id"],
+                    con,
+                    fa_drawing_id=drawing_id,
+                    arch_drawing_id=matching_drawing_id
+                )
             except Exception as e:
                 con.execute("UPDATE drawings SET status = 'failed' WHERE id = ?", (drawing_id,))
-                raise HTTPException(400, f"Fire Alarm DXF Parsing Failed: {str(e)}")
+                raise HTTPException(400, f"Fire Alarm DXF Processing / Linking Failed: {str(e)}")
             return
 
         if file_url and file_type in ("dxf", "pdf"):
@@ -455,15 +452,27 @@ def list_project_drawings(project_id: str) -> list[dict[str, Any]]:
 
 
 @app.post("/projects/{project_id}/link-devices")
-def trigger_project_device_linking(project_id: str) -> dict[str, Any]:
+def trigger_project_device_linking(
+    project_id: str,
+    architectural_drawing_id: str | None = None,
+    fire_alarm_drawing_id: str | None = None
+) -> dict[str, Any]:
     """Triggers cross-document entity linking between fire alarm devices and architectural room polygons."""
+    if not architectural_drawing_id or not str(architectural_drawing_id).strip():
+        raise HTTPException(400, "architectural_drawing_id query parameter is strictly required to link fire alarm devices.")
     with db() as con:
         if not con.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found.")
         from app.linking import link_fire_alarm_devices_to_rooms
-        links = link_fire_alarm_devices_to_rooms(project_id, con)
+        links = link_fire_alarm_devices_to_rooms(
+            project_id,
+            con,
+            fa_drawing_id=fire_alarm_drawing_id,
+            arch_drawing_id=architectural_drawing_id.strip()
+        )
         return {
             "project_id": project_id,
+            "architectural_drawing_id": architectural_drawing_id.strip(),
             "total_devices": len(links),
             "assigned_rooms_count": sum(1 for l in links if l["status"] == "assigned_room"),
             "unassigned_corridor_count": sum(1 for l in links if l["status"] == "unassigned_corridor"),
@@ -530,6 +539,7 @@ async def upload_drawing(
     occupancy_type: str = Form("Business - Regular office areas"),
     sprinklered: bool = Form(True),
     scale: float = Form(100),
+    architectural_drawing_id: str | None = Form(None),
     matching_drawing_id: str | None = Form(None)
 ) -> dict[str, Any]:
     doc_type = (document_type or "architectural").strip().lower()
@@ -540,6 +550,25 @@ async def upload_drawing(
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in ALLOWED_FILE_TYPES:
         raise HTTPException(415, "Only DXF and PDF drawings are supported.")
+
+    target_arch_id = (architectural_drawing_id or matching_drawing_id or "").strip()
+    if doc_type == "fire_alarm":
+        if not target_arch_id:
+            raise HTTPException(
+                400,
+                "architectural_drawing_id parameter is strictly required when uploading a fire_alarm drawing. "
+                "Silently picking an arbitrary architectural drawing is prohibited."
+            )
+        with db() as con:
+            target_draw = con.execute(
+                "SELECT id, floor_name, document_type FROM drawings WHERE id = ? AND project_id = ?",
+                (target_arch_id, project_id)
+            ).fetchone()
+            if not target_draw:
+                raise HTTPException(400, f"Target architectural drawing '{target_arch_id}' was not found in project '{project_id}'.")
+            if target_draw.get("document_type") and target_draw["document_type"] != "architectural":
+                raise HTTPException(400, f"Target drawing '{target_arch_id}' has document_type '{target_draw['document_type']}', but must be 'architectural'.")
+
     with db() as con:
         if not con.execute("SELECT 1 FROM projects WHERE id = ?", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found.")
@@ -562,7 +591,7 @@ async def upload_drawing(
     invalidate_drawing_cache(drawing_id)
 
     # Process drawing geometry for page 0
-    process_upload(drawing_id, page_index=0, matching_drawing_id=matching_drawing_id)
+    process_upload(drawing_id, page_index=0, matching_drawing_id=target_arch_id if doc_type == "fire_alarm" else None)
     
     with db() as con:
         drawing = con.execute("SELECT * FROM drawings WHERE id = ?", (drawing_id,)).fetchone()
